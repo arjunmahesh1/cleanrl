@@ -23,9 +23,45 @@ def locate_mujoco_xml(env_id: str) -> str:
             return str(env.unwrapped.model_path)
         if hasattr(env.unwrapped, "model") and hasattr(env.unwrapped.model, "xml_path"):
             return str(env.unwrapped.model.xml_path)
-        raise AttributeError(f"Could not locate XML path for env_id={env_id}")
     finally:
         env.close()
+
+    import gymnasium.envs.mujoco as mj
+
+    assets_dir = os.path.join(os.path.dirname(mj.__file__), "assets")
+    base = env_id.split("-", 1)[0]
+    base_lower = base.lower()
+
+    def camel_to_snake(name: str) -> str:
+        out = []
+        for ch in name:
+            if ch.isupper() and out:
+                out.append("_")
+            out.append(ch.lower())
+        return "".join(out)
+
+    candidates = []
+    special = {
+        "HumanoidStandup": "humanoidstandup",
+    }
+    if base in special:
+        candidates.append(special[base])
+    candidates.append(base_lower)
+    candidates.append(camel_to_snake(base))
+
+    for stem in candidates:
+        xml_path = os.path.join(assets_dir, f"{stem}.xml")
+        if os.path.isfile(xml_path):
+            return xml_path
+
+    available = []
+    if os.path.isdir(assets_dir):
+        available = [f for f in os.listdir(assets_dir) if f.endswith(".xml")]
+    raise AttributeError(
+        f"Could not locate XML path for env_id={env_id}. "
+        f"Tried: {', '.join([c + '.xml' for c in candidates])}. "
+        f"Available: {', '.join(available)}"
+    )
 
 
 def perturb_mujoco_xml(
@@ -105,9 +141,33 @@ def make_mujoco_env(
         actuator_gain_scale=actuator_gain_scale,
         actuator_bias_scale=actuator_bias_scale,
     )
-    if render_mode:
-        return gym.make(env_id, xml_file=xml_path, render_mode=render_mode)
-    return gym.make(env_id, xml_file=xml_path)
+
+    try:
+        if render_mode:
+            return gym.make(env_id, xml_file=xml_path, render_mode=render_mode)
+        return gym.make(env_id, xml_file=xml_path)
+    except TypeError:
+        spec = gym.spec(env_id)
+        env_cls = gym.envs.registration.load_env_creator(spec.entry_point)
+        env_kwargs = spec.kwargs.copy() if spec.kwargs else {}
+        if render_mode:
+            env_kwargs['render_mode'] = render_mode
+
+        from gymnasium.envs.mujoco import MujocoEnv
+        original_init = MujocoEnv.__init__
+
+        def custom_init(self, model_path, *args, **kwargs):
+            if not os.path.isabs(model_path):
+                model_path = xml_path
+            original_init(self, model_path, *args, **kwargs)
+
+        MujocoEnv.__init__ = custom_init
+        try:
+            env = env_cls(**env_kwargs)
+        finally:
+            MujocoEnv.__init__ = original_init
+
+        return env
 
 
 __all__ = [
