@@ -16,6 +16,8 @@ from flax.training.train_state import TrainState
 from torch.utils.tensorboard import SummaryWriter
 
 from cleanrl_utils.buffers import ReplayBuffer
+from cleanrl_utils.mujoco_xml_utils import make_mujoco_env
+from cleanrl_utils.perturbation_config import apply_env_perturbations
 
 
 @dataclass
@@ -64,16 +66,87 @@ class Args:
     """the frequency of training policy (delayed)"""
     noise_clip: float = 0.5
     """noise clip parameter of the Target Policy Smoothing Regularization"""
+    obs_noise_std: float = 0.0
+    """Gaussian observation noise std (0 to disable)"""
+    obs_noise_clip: float | None = None
+    """clip magnitude for observation noise (None for no clip)"""
+    reward_noise_std: float = 0.0
+    """Gaussian reward noise std (0 to disable)"""
+    action_noise_std: float = 0.0
+    """Gaussian action noise std (0 to disable)"""
+    action_noise_clip: float | None = None
+    """clip magnitude for action noise (None for no clip)"""
+    param_override: str = ""
+    """env param overrides: name[:mode]=value, comma-separated (mode: set|scale|add)"""
+    param_randomize: str = ""
+    """env param randomization: name[:mode]=low..high, comma-separated (mode: set|scale|add)"""
+    param_strict: bool = True
+    """if true, unknown env params in overrides/randomization raise errors"""
+    xml_perturb: bool = False
+    """if true, create a perturbed MuJoCo XML and load from it"""
+    xml_out_dir: str = "perturbed_xml"
+    """output directory for perturbed XML files"""
+    xml_path_override: str | None = None
+    """optional base XML path to perturb (defaults to env's XML)"""
+    xml_body_mass_scale: float = 1.0
+    """scale body mass attributes in XML"""
+    xml_geom_friction_scale: float = 1.0
+    """scale geom friction attributes in XML"""
+    xml_joint_damping_scale: float = 1.0
+    """scale joint damping attributes in XML"""
+    xml_actuator_gain_scale: float = 1.0
+    """scale actuator gain parameters in XML"""
+    xml_actuator_bias_scale: float = 1.0
+    """scale actuator bias parameters in XML"""
 
 
-def make_env(env_id, seed, idx, capture_video, run_name):
+def make_env(env_id, seed, idx, capture_video, run_name, args):
     def thunk():
         if capture_video and idx == 0:
-            env = gym.make(env_id, render_mode="rgb_array")
+            if args.xml_perturb:
+                env = make_mujoco_env(
+                    env_id,
+                    xml_out_dir=args.xml_out_dir,
+                    run_name=run_name,
+                    body_mass_scale=args.xml_body_mass_scale,
+                    geom_friction_scale=args.xml_geom_friction_scale,
+                    joint_damping_scale=args.xml_joint_damping_scale,
+                    actuator_gain_scale=args.xml_actuator_gain_scale,
+                    actuator_bias_scale=args.xml_actuator_bias_scale,
+                    xml_path_override=args.xml_path_override,
+                    render_mode="rgb_array",
+                )
+            else:
+                env = gym.make(env_id, render_mode="rgb_array")
             env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
         else:
-            env = gym.make(env_id)
+            if args.xml_perturb:
+                env = make_mujoco_env(
+                    env_id,
+                    xml_out_dir=args.xml_out_dir,
+                    run_name=run_name,
+                    body_mass_scale=args.xml_body_mass_scale,
+                    geom_friction_scale=args.xml_geom_friction_scale,
+                    joint_damping_scale=args.xml_joint_damping_scale,
+                    actuator_gain_scale=args.xml_actuator_gain_scale,
+                    actuator_bias_scale=args.xml_actuator_bias_scale,
+                    xml_path_override=args.xml_path_override,
+                )
+            else:
+                env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
+        env = apply_env_perturbations(
+            env,
+            obs_noise_std=args.obs_noise_std,
+            obs_noise_clip=args.obs_noise_clip,
+            reward_noise_std=args.reward_noise_std,
+            action_noise_std=args.action_noise_std,
+            action_noise_clip=args.action_noise_clip,
+            param_override_spec=args.param_override,
+            param_randomize_spec=args.param_randomize,
+            param_strict=args.param_strict,
+            seed=seed,
+        )
         env.action_space.seed(seed)
         return env
 
@@ -142,7 +215,7 @@ if __name__ == "__main__":
     key, actor_key, qf1_key, qf2_key = jax.random.split(key, 4)
 
     # env setup
-    envs = gym.vector.SyncVectorEnv([make_env(args.env_id, args.seed, 0, args.capture_video, run_name)])
+    envs = gym.vector.SyncVectorEnv([make_env(args.env_id, args.seed, 0, args.capture_video, run_name, args)])
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
     max_action = float(envs.single_action_space.high[0])

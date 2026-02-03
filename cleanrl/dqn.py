@@ -14,6 +14,7 @@ import tyro
 from torch.utils.tensorboard import SummaryWriter
 
 from cleanrl_utils.buffers import ReplayBuffer
+from cleanrl_utils.perturbation_config import apply_env_perturbations
 
 
 @dataclass
@@ -70,9 +71,21 @@ class Args:
     """timestep to start learning"""
     train_frequency: int = 10
     """the frequency of training"""
+    obs_noise_std: float = 0.0
+    """Gaussian observation noise std (0 to disable)"""
+    obs_noise_clip: float | None = None
+    """clip magnitude for observation noise (None for no clip)"""
+    reward_noise_std: float = 0.0
+    """Gaussian reward noise std (0 to disable)"""
+    param_override: str = ""
+    """env param overrides: name[:mode]=value, comma-separated (mode: set|scale|add)"""
+    param_randomize: str = ""
+    """env param randomization: name[:mode]=low..high, comma-separated (mode: set|scale|add)"""
+    param_strict: bool = True
+    """if true, unknown env params in overrides/randomization raise errors"""
 
 
-def make_env(env_id, seed, idx, capture_video, run_name):
+def make_env(env_id, seed, idx, capture_video, run_name, args):
     def thunk():
         if capture_video and idx == 0:
             env = gym.make(env_id, render_mode="rgb_array")
@@ -80,6 +93,18 @@ def make_env(env_id, seed, idx, capture_video, run_name):
         else:
             env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
+        env = apply_env_perturbations(
+            env,
+            obs_noise_std=args.obs_noise_std,
+            obs_noise_clip=args.obs_noise_clip,
+            reward_noise_std=args.reward_noise_std,
+            action_noise_std=0.0,
+            action_noise_clip=None,
+            param_override_spec=args.param_override,
+            param_randomize_spec=args.param_randomize,
+            param_strict=args.param_strict,
+            seed=seed,
+        )
         env.action_space.seed(seed)
 
         return env
@@ -140,7 +165,7 @@ if __name__ == "__main__":
 
     # env setup
     envs = gym.vector.SyncVectorEnv(
-        [make_env(args.env_id, args.seed + i, i, args.capture_video, run_name) for i in range(args.num_envs)]
+        [make_env(args.env_id, args.seed + i, i, args.capture_video, run_name, args) for i in range(args.num_envs)]
     )
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
@@ -226,7 +251,7 @@ if __name__ == "__main__":
 
         episodic_returns = evaluate(
             model_path,
-            make_env,
+            lambda env_id, seed, idx, capture_video, run_name: make_env(env_id, seed, idx, capture_video, run_name, args),
             args.env_id,
             eval_episodes=10,
             run_name=f"{run_name}-eval",
