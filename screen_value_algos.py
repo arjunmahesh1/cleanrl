@@ -57,6 +57,7 @@ def main():
     parser.add_argument("--track", action="store_true")
     parser.add_argument("--wandb-entity", default="")
     parser.add_argument("--wandb-project-name", default="cleanRL")
+    parser.add_argument("--run-dir", default="runs", help="base directory for TensorBoard logs")
     parser.add_argument("--extra-args", default="", help="extra args appended to each run")
     args = parser.parse_args()
 
@@ -70,7 +71,7 @@ def main():
     seeds = [int(s) for s in parse_csv_list(args.seeds)]
     thresholds = parse_thresholds(args.thresholds)
 
-    runs_dir = "runs"
+    runs_dir = args.run_dir
     results = []
     for algo in algos:
         if algo not in algo_map:
@@ -88,6 +89,8 @@ def main():
                     str(seed),
                     "--total-timesteps",
                     str(args.total_timesteps),
+                    "--run-dir",
+                    args.run_dir,
                 ]
                 if args.track:
                     cmd += ["--track"]
