@@ -48,7 +48,7 @@ def load_last_returns(run_dir: str, tag: str, window: int) -> Tuple[float | None
 
 def main():
     parser = argparse.ArgumentParser(description="Screen value-based algorithms across envs/seeds.")
-    parser.add_argument("--algos", default="dqn,c51,pqn", help="comma-separated algos: dqn,c51,pqn")
+    parser.add_argument("--algos", default="dqn,c51,pqn,ppo", help="comma-separated algos: dqn,c51,pqn,ppo,ppo_cont")
     parser.add_argument("--envs", default="CartPole-v1", help="comma-separated env ids")
     parser.add_argument("--seeds", default="1,2,3", help="comma-separated seeds")
     parser.add_argument("--total-timesteps", type=int, default=50000)
@@ -65,6 +65,8 @@ def main():
         "dqn": os.path.join("cleanrl", "dqn.py"),
         "c51": os.path.join("cleanrl", "c51.py"),
         "pqn": os.path.join("cleanrl", "pqn.py"),
+        "ppo": os.path.join("cleanrl", "ppo.py"),
+        "ppo_cont": os.path.join("cleanrl", "ppo_continuous_action.py"),
     }
     algos = parse_csv_list(args.algos)
     envs = parse_csv_list(args.envs)
