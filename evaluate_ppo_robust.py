@@ -1,4 +1,6 @@
 import argparse
+import os
+import time
 from types import SimpleNamespace
 
 import gymnasium as gym
@@ -9,6 +11,24 @@ from cleanrl.ppo import Agent as PPOAgent
 from cleanrl.ppo import make_env as make_ppo_env
 from cleanrl.ppo_continuous_action import Agent as PPOContinuousAgent
 from cleanrl.ppo_continuous_action import make_env as make_ppo_continuous_env
+
+
+def is_perturbed_eval(args: argparse.Namespace) -> bool:
+    return any(
+        [
+            args.obs_noise_std > 0.0,
+            args.reward_noise_std > 0.0,
+            args.action_noise_std > 0.0,
+            bool(args.param_override),
+            bool(args.param_randomize),
+            args.xml_perturb,
+            args.xml_body_mass_scale != 1.0,
+            args.xml_geom_friction_scale != 1.0,
+            args.xml_joint_damping_scale != 1.0,
+            args.xml_actuator_gain_scale != 1.0,
+            args.xml_actuator_bias_scale != 1.0,
+        ]
+    )
 
 
 def build_perturbation_args(args: argparse.Namespace) -> SimpleNamespace:
@@ -97,6 +117,10 @@ def main():
     parser.add_argument("--capture-video", action="store_true")
     parser.add_argument("--run-name", default="")
     parser.add_argument("--gamma", type=float, default=0.99)
+    parser.add_argument("--track", action="store_true")
+    parser.add_argument("--wandb-project-name", default="cleanRL")
+    parser.add_argument("--wandb-entity", default=None)
+    parser.add_argument("--wandb-group", default="")
 
     parser.add_argument("--obs-noise-std", type=float, default=0.0)
     parser.add_argument("--obs-noise-clip", type=float, default=None)
@@ -117,6 +141,24 @@ def main():
     parser.add_argument("--xml-actuator-bias-scale", type=float, default=1.0)
 
     args = parser.parse_args()
+    eval_name = args.run_name or f"eval__{args.env_id}__{args.algo}__{int(time.time())}"
+    is_perturbed = is_perturbed_eval(args)
+
+    wandb_run = None
+    if args.track:
+        import wandb
+
+        config = vars(args).copy()
+        config["eval_is_perturbed"] = is_perturbed
+        config["model_basename"] = os.path.basename(args.model_path)
+        wandb_run = wandb.init(
+            project=args.wandb_project_name,
+            entity=args.wandb_entity,
+            config=config,
+            name=eval_name,
+            group=args.wandb_group or None,
+            job_type="evaluation",
+        )
 
     if args.algo == "ppo":
         episodic_returns = evaluate_discrete(args)
@@ -124,10 +166,36 @@ def main():
         episodic_returns = evaluate_continuous(args)
 
     returns = np.array(episodic_returns, dtype=np.float64)
-    print(f"mean_return={returns.mean():.4f}")
-    print(f"std_return={returns.std(ddof=1) if len(returns) > 1 else 0.0:.4f}")
-    print(f"min_return={returns.min():.4f}")
-    print(f"max_return={returns.max():.4f}")
+    mean_return = returns.mean()
+    std_return = returns.std(ddof=1) if len(returns) > 1 else 0.0
+    min_return = returns.min()
+    max_return = returns.max()
+    print(f"mean_return={mean_return:.4f}")
+    print(f"std_return={std_return:.4f}")
+    print(f"min_return={min_return:.4f}")
+    print(f"max_return={max_return:.4f}")
+
+    if wandb_run is not None:
+        import wandb
+
+        for i, r in enumerate(episodic_returns):
+            wandb.log({"eval/episode": i, "eval/episodic_return": r})
+        wandb.log(
+            {
+                "eval/mean_return": mean_return,
+                "eval/std_return": std_return,
+                "eval/min_return": min_return,
+                "eval/max_return": max_return,
+                "eval/is_perturbed": int(is_perturbed),
+                "eval/eval_episodes": len(episodic_returns),
+            }
+        )
+        wandb_run.summary["eval/mean_return"] = mean_return
+        wandb_run.summary["eval/std_return"] = std_return
+        wandb_run.summary["eval/min_return"] = min_return
+        wandb_run.summary["eval/max_return"] = max_return
+        wandb_run.summary["eval/is_perturbed"] = int(is_perturbed)
+        wandb_run.finish()
 
 
 if __name__ == "__main__":
