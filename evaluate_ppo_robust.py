@@ -13,6 +13,41 @@ from cleanrl.ppo_continuous_action import Agent as PPOContinuousAgent
 from cleanrl.ppo_continuous_action import make_env as make_ppo_continuous_env
 
 
+def find_wrapper(env: gym.Env, wrapper_cls):
+    current = env
+    while True:
+        if isinstance(current, wrapper_cls):
+            return current
+        if not hasattr(current, "env"):
+            return None
+        current = current.env
+
+
+def load_normalization_stats_if_available(envs, args: argparse.Namespace) -> bool:
+    norm_stats_path = args.norm_stats_path or f"{args.model_path}.norm_stats.npz"
+    if not os.path.exists(norm_stats_path):
+        print(f"warning: normalization stats file not found: {norm_stats_path}")
+        print("warning: ppo_cont evaluation without training normalization stats can severely under-report performance.")
+        return False
+
+    stats = np.load(norm_stats_path)
+    env = envs.envs[0]
+    obs_norm = find_wrapper(env, gym.wrappers.NormalizeObservation)
+    rew_norm = find_wrapper(env, gym.wrappers.NormalizeReward)
+    if obs_norm is None or rew_norm is None:
+        print("warning: normalization wrappers not found in eval env; cannot load normalization stats.")
+        return False
+
+    obs_norm.obs_rms.mean = np.asarray(stats["obs_mean"], dtype=np.float64)
+    obs_norm.obs_rms.var = np.asarray(stats["obs_var"], dtype=np.float64)
+    obs_norm.obs_rms.count = float(np.asarray(stats["obs_count"], dtype=np.float64))
+    rew_norm.return_rms.mean = float(np.asarray(stats["ret_mean"], dtype=np.float64))
+    rew_norm.return_rms.var = float(np.asarray(stats["ret_var"], dtype=np.float64))
+    rew_norm.return_rms.count = float(np.asarray(stats["ret_count"], dtype=np.float64))
+    print(f"loaded normalization stats from {norm_stats_path}")
+    return True
+
+
 def is_perturbed_eval(args: argparse.Namespace) -> bool:
     return any(
         [
@@ -84,6 +119,7 @@ def evaluate_continuous(args: argparse.Namespace):
     envs = gym.vector.SyncVectorEnv(
         [make_ppo_continuous_env(args.env_id, 0, args.capture_video, run_name, args.gamma, perturb, args.seed)]
     )
+    load_normalization_stats_if_available(envs, args)
     device = torch.device(args.device)
     agent = PPOContinuousAgent(envs).to(device)
     agent.load_state_dict(torch.load(args.model_path, map_location=device))
@@ -117,6 +153,7 @@ def main():
     parser.add_argument("--capture-video", action="store_true")
     parser.add_argument("--run-name", default="")
     parser.add_argument("--gamma", type=float, default=0.99)
+    parser.add_argument("--norm-stats-path", default="")
     parser.add_argument("--track", action="store_true")
     parser.add_argument("--wandb-project-name", default="cleanRL")
     parser.add_argument("--wandb-entity", default=None)

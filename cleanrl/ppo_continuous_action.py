@@ -3,6 +3,7 @@ import os
 import random
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 import gymnasium as gym
 import numpy as np
@@ -237,6 +238,24 @@ class Agent(nn.Module):
         return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
 
 
+def save_normalization_stats(envs, model_path: str) -> str:
+    # Persist NormalizeObservation/NormalizeReward statistics for reliable checkpoint evaluation.
+    env = envs.envs[0]
+    obs_rms = env.get_wrapper_attr("obs_rms")
+    return_rms = env.get_wrapper_attr("return_rms")
+    norm_path = f"{model_path}.norm_stats.npz"
+    np.savez_compressed(
+        norm_path,
+        obs_mean=np.asarray(obs_rms.mean, dtype=np.float64),
+        obs_var=np.asarray(obs_rms.var, dtype=np.float64),
+        obs_count=np.asarray(obs_rms.count, dtype=np.float64),
+        ret_mean=np.asarray(return_rms.mean, dtype=np.float64),
+        ret_var=np.asarray(return_rms.var, dtype=np.float64),
+        ret_count=np.asarray(return_rms.count, dtype=np.float64),
+    )
+    return norm_path
+
+
 if __name__ == "__main__":
     args = tyro.cli(Args)
     if args.tv90_keep_prob <= 0.0 or args.tv90_keep_prob > 1.0:
@@ -437,8 +456,11 @@ if __name__ == "__main__":
 
     if args.save_model:
         model_path = os.path.join(args.run_dir, run_name, f"{args.exp_name}.cleanrl_model")
+        Path(os.path.dirname(model_path)).mkdir(parents=True, exist_ok=True)
         torch.save(agent.state_dict(), model_path)
         print(f"model saved to {model_path}")
+        norm_stats_path = save_normalization_stats(envs, model_path)
+        print(f"normalization stats saved to {norm_stats_path}")
         from cleanrl_utils.evals.ppo_eval import evaluate
 
         episodic_returns = evaluate(
