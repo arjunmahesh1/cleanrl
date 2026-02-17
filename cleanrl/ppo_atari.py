@@ -40,6 +40,8 @@ class Args:
     """the entity (team) of wandb's project"""
     capture_video: bool = False
     """whether to capture videos of the agent performances (check out `videos` folder)"""
+    run_dir: str = "runs"
+    """base directory for TensorBoard logs"""
 
     # Algorithm specific arguments
     env_id: str = "BreakoutNoFrameskip-v4"
@@ -76,6 +78,12 @@ class Args:
     """the maximum norm for the gradient clipping"""
     target_kl: float = None
     """the target KL divergence threshold"""
+    tv90_clip_value_targets: bool = False
+    """if true, clip value targets to the central TV-90 quantile"""
+    tv90_clip_advantages: bool = False
+    """if true, clip advantages to the central TV-90 quantile"""
+    tv90_keep_prob: float = 0.90
+    """central probability mass kept by TV clipping (e.g., 0.90 keeps central 90%)"""
 
     # to be filled in runtime
     batch_size: int = 0
@@ -114,6 +122,18 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     return layer
 
 
+def central_quantile_clip(x: torch.Tensor, keep_prob: float):
+    if keep_prob <= 0.0 or keep_prob > 1.0:
+        raise ValueError("tv90_keep_prob must be in (0, 1].")
+    if keep_prob == 1.0:
+        inf = torch.tensor(float("inf"), device=x.device, dtype=x.dtype)
+        return x, -inf, inf
+    tail = (1.0 - keep_prob) / 2.0
+    lower = torch.quantile(x, tail)
+    upper = torch.quantile(x, 1.0 - tail)
+    return torch.clamp(x, lower, upper), lower, upper
+
+
 class Agent(nn.Module):
     def __init__(self, envs):
         super().__init__()
@@ -145,6 +165,8 @@ class Agent(nn.Module):
 
 if __name__ == "__main__":
     args = tyro.cli(Args)
+    if args.tv90_keep_prob <= 0.0 or args.tv90_keep_prob > 1.0:
+        raise ValueError("--tv90-keep-prob must be in (0, 1].")
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     args.num_iterations = args.total_timesteps // args.batch_size
@@ -161,7 +183,7 @@ if __name__ == "__main__":
             monitor_gym=True,
             save_code=True,
         )
-    writer = SummaryWriter(f"runs/{run_name}")
+    writer = SummaryWriter(os.path.join(args.run_dir, run_name))
     writer.add_text(
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
@@ -254,6 +276,14 @@ if __name__ == "__main__":
         b_advantages = advantages.reshape(-1)
         b_returns = returns.reshape(-1)
         b_values = values.reshape(-1)
+        tv90_return_lower = None
+        tv90_return_upper = None
+        tv90_adv_lower = None
+        tv90_adv_upper = None
+        if args.tv90_clip_value_targets:
+            b_returns, tv90_return_lower, tv90_return_upper = central_quantile_clip(b_returns, args.tv90_keep_prob)
+        if args.tv90_clip_advantages:
+            b_advantages, tv90_adv_lower, tv90_adv_upper = central_quantile_clip(b_advantages, args.tv90_keep_prob)
 
         # Optimizing the policy and value network
         b_inds = np.arange(args.batch_size)
@@ -322,6 +352,12 @@ if __name__ == "__main__":
         writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
         writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
+        if tv90_return_lower is not None:
+            writer.add_scalar("robust/tv90_return_lower", tv90_return_lower.item(), global_step)
+            writer.add_scalar("robust/tv90_return_upper", tv90_return_upper.item(), global_step)
+        if tv90_adv_lower is not None:
+            writer.add_scalar("robust/tv90_adv_lower", tv90_adv_lower.item(), global_step)
+            writer.add_scalar("robust/tv90_adv_upper", tv90_adv_upper.item(), global_step)
         print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 

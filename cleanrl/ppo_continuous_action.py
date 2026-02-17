@@ -3,6 +3,7 @@ import os
 import random
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 import gymnasium as gym
 import numpy as np
@@ -12,6 +13,9 @@ import torch.optim as optim
 import tyro
 from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
+
+from cleanrl_utils.mujoco_xml_utils import make_mujoco_env
+from cleanrl_utils.perturbation_config import apply_env_perturbations
 
 
 @dataclass
@@ -38,6 +42,8 @@ class Args:
     """whether to upload the saved model to huggingface"""
     hf_entity: str = ""
     """the user or org name of the model repository from the Hugging Face Hub"""
+    run_dir: str = "runs"
+    """base directory for TensorBoard logs and saved models"""
 
     # Algorithm specific arguments
     env_id: str = "HalfCheetah-v4"
@@ -74,6 +80,44 @@ class Args:
     """the maximum norm for the gradient clipping"""
     target_kl: float = None
     """the target KL divergence threshold"""
+    obs_noise_std: float = 0.0
+    """Gaussian observation noise std (0 to disable)"""
+    obs_noise_clip: float | None = None
+    """clip magnitude for observation noise (None for no clip)"""
+    reward_noise_std: float = 0.0
+    """Gaussian reward noise std (0 to disable)"""
+    action_noise_std: float = 0.0
+    """Gaussian action noise std (0 to disable)"""
+    action_noise_clip: float | None = None
+    """clip magnitude for action noise (None for no clip)"""
+    param_override: str = ""
+    """env param overrides: name[:mode]=value, comma-separated (mode: set|scale|add)"""
+    param_randomize: str = ""
+    """env param randomization: name[:mode]=low..high, comma-separated (mode: set|scale|add)"""
+    param_strict: bool = True
+    """if true, unknown env params in overrides/randomization raise errors"""
+    xml_perturb: bool = False
+    """if true, create a perturbed MuJoCo XML and load from it"""
+    xml_out_dir: str = "perturbed_xml"
+    """output directory for perturbed XML files"""
+    xml_path_override: str | None = None
+    """optional base XML path to perturb (defaults to env's XML)"""
+    xml_body_mass_scale: float = 1.0
+    """scale body mass attributes in XML"""
+    xml_geom_friction_scale: float = 1.0
+    """scale geom friction attributes in XML"""
+    xml_joint_damping_scale: float = 1.0
+    """scale joint damping attributes in XML"""
+    xml_actuator_gain_scale: float = 1.0
+    """scale actuator gain parameters in XML"""
+    xml_actuator_bias_scale: float = 1.0
+    """scale actuator bias parameters in XML"""
+    tv90_clip_value_targets: bool = False
+    """if true, clip value targets to the central TV-90 quantile"""
+    tv90_clip_advantages: bool = False
+    """if true, clip advantages to the central TV-90 quantile"""
+    tv90_keep_prob: float = 0.90
+    """central probability mass kept by TV clipping (e.g., 0.90 keeps central 90%)"""
 
     # to be filled in runtime
     batch_size: int = 0
@@ -84,13 +128,40 @@ class Args:
     """the number of iterations (computed in runtime)"""
 
 
-def make_env(env_id, idx, capture_video, run_name, gamma):
+def make_env(env_id, idx, capture_video, run_name, gamma, args=None, seed=0):
     def thunk():
         if capture_video and idx == 0:
-            env = gym.make(env_id, render_mode="rgb_array")
+            if args is not None and args.xml_perturb:
+                env = make_mujoco_env(
+                    env_id,
+                    xml_out_dir=args.xml_out_dir,
+                    run_name=run_name,
+                    body_mass_scale=args.xml_body_mass_scale,
+                    geom_friction_scale=args.xml_geom_friction_scale,
+                    joint_damping_scale=args.xml_joint_damping_scale,
+                    actuator_gain_scale=args.xml_actuator_gain_scale,
+                    actuator_bias_scale=args.xml_actuator_bias_scale,
+                    xml_path_override=args.xml_path_override,
+                    render_mode="rgb_array",
+                )
+            else:
+                env = gym.make(env_id, render_mode="rgb_array")
             env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
         else:
-            env = gym.make(env_id)
+            if args is not None and args.xml_perturb:
+                env = make_mujoco_env(
+                    env_id,
+                    xml_out_dir=args.xml_out_dir,
+                    run_name=run_name,
+                    body_mass_scale=args.xml_body_mass_scale,
+                    geom_friction_scale=args.xml_geom_friction_scale,
+                    joint_damping_scale=args.xml_joint_damping_scale,
+                    actuator_gain_scale=args.xml_actuator_gain_scale,
+                    actuator_bias_scale=args.xml_actuator_bias_scale,
+                    xml_path_override=args.xml_path_override,
+                )
+            else:
+                env = gym.make(env_id)
         env = gym.wrappers.FlattenObservation(env)  # deal with dm_control's Dict observation space
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = gym.wrappers.ClipAction(env)
@@ -98,9 +169,35 @@ def make_env(env_id, idx, capture_video, run_name, gamma):
         env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
         env = gym.wrappers.NormalizeReward(env, gamma=gamma)
         env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
+        if args is not None:
+            env = apply_env_perturbations(
+                env,
+                obs_noise_std=args.obs_noise_std,
+                obs_noise_clip=args.obs_noise_clip,
+                reward_noise_std=args.reward_noise_std,
+                action_noise_std=args.action_noise_std,
+                action_noise_clip=args.action_noise_clip,
+                param_override_spec=args.param_override,
+                param_randomize_spec=args.param_randomize,
+                param_strict=args.param_strict,
+                seed=seed,
+            )
+        env.action_space.seed(seed)
         return env
 
     return thunk
+
+
+def central_quantile_clip(x: torch.Tensor, keep_prob: float):
+    if keep_prob <= 0.0 or keep_prob > 1.0:
+        raise ValueError("tv90_keep_prob must be in (0, 1].")
+    if keep_prob == 1.0:
+        inf = torch.tensor(float("inf"), device=x.device, dtype=x.dtype)
+        return x, -inf, inf
+    tail = (1.0 - keep_prob) / 2.0
+    lower = torch.quantile(x, tail)
+    upper = torch.quantile(x, 1.0 - tail)
+    return torch.clamp(x, lower, upper), lower, upper
 
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
@@ -141,8 +238,28 @@ class Agent(nn.Module):
         return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
 
 
+def save_normalization_stats(envs, model_path: str) -> str:
+    # Persist NormalizeObservation/NormalizeReward statistics for reliable checkpoint evaluation.
+    env = envs.envs[0]
+    obs_rms = env.get_wrapper_attr("obs_rms")
+    return_rms = env.get_wrapper_attr("return_rms")
+    norm_path = f"{model_path}.norm_stats.npz"
+    np.savez_compressed(
+        norm_path,
+        obs_mean=np.asarray(obs_rms.mean, dtype=np.float64),
+        obs_var=np.asarray(obs_rms.var, dtype=np.float64),
+        obs_count=np.asarray(obs_rms.count, dtype=np.float64),
+        ret_mean=np.asarray(return_rms.mean, dtype=np.float64),
+        ret_var=np.asarray(return_rms.var, dtype=np.float64),
+        ret_count=np.asarray(return_rms.count, dtype=np.float64),
+    )
+    return norm_path
+
+
 if __name__ == "__main__":
     args = tyro.cli(Args)
+    if args.tv90_keep_prob <= 0.0 or args.tv90_keep_prob > 1.0:
+        raise ValueError("--tv90-keep-prob must be in (0, 1].")
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     args.num_iterations = args.total_timesteps // args.batch_size
@@ -159,7 +276,7 @@ if __name__ == "__main__":
             monitor_gym=True,
             save_code=True,
         )
-    writer = SummaryWriter(f"runs/{run_name}")
+    writer = SummaryWriter(os.path.join(args.run_dir, run_name))
     writer.add_text(
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
@@ -175,7 +292,7 @@ if __name__ == "__main__":
 
     # env setup
     envs = gym.vector.SyncVectorEnv(
-        [make_env(args.env_id, i, args.capture_video, run_name, args.gamma) for i in range(args.num_envs)]
+        [make_env(args.env_id, i, args.capture_video, run_name, args.gamma, args, args.seed + i) for i in range(args.num_envs)]
     )
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
@@ -252,6 +369,14 @@ if __name__ == "__main__":
         b_advantages = advantages.reshape(-1)
         b_returns = returns.reshape(-1)
         b_values = values.reshape(-1)
+        tv90_return_lower = None
+        tv90_return_upper = None
+        tv90_adv_lower = None
+        tv90_adv_upper = None
+        if args.tv90_clip_value_targets:
+            b_returns, tv90_return_lower, tv90_return_upper = central_quantile_clip(b_returns, args.tv90_keep_prob)
+        if args.tv90_clip_advantages:
+            b_advantages, tv90_adv_lower, tv90_adv_upper = central_quantile_clip(b_advantages, args.tv90_keep_prob)
 
         # Optimizing the policy and value network
         b_inds = np.arange(args.batch_size)
@@ -320,13 +445,22 @@ if __name__ == "__main__":
         writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
         writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
+        if tv90_return_lower is not None:
+            writer.add_scalar("robust/tv90_return_lower", tv90_return_lower.item(), global_step)
+            writer.add_scalar("robust/tv90_return_upper", tv90_return_upper.item(), global_step)
+        if tv90_adv_lower is not None:
+            writer.add_scalar("robust/tv90_adv_lower", tv90_adv_lower.item(), global_step)
+            writer.add_scalar("robust/tv90_adv_upper", tv90_adv_upper.item(), global_step)
         print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
     if args.save_model:
-        model_path = f"runs/{run_name}/{args.exp_name}.cleanrl_model"
+        model_path = os.path.join(args.run_dir, run_name, f"{args.exp_name}.cleanrl_model")
+        Path(os.path.dirname(model_path)).mkdir(parents=True, exist_ok=True)
         torch.save(agent.state_dict(), model_path)
         print(f"model saved to {model_path}")
+        norm_stats_path = save_normalization_stats(envs, model_path)
+        print(f"normalization stats saved to {norm_stats_path}")
         from cleanrl_utils.evals.ppo_eval import evaluate
 
         episodic_returns = evaluate(
@@ -337,6 +471,7 @@ if __name__ == "__main__":
             run_name=f"{run_name}-eval",
             Model=Agent,
             device=device,
+            capture_video=args.capture_video,
             gamma=args.gamma,
         )
         for idx, episodic_return in enumerate(episodic_returns):
@@ -347,7 +482,7 @@ if __name__ == "__main__":
 
             repo_name = f"{args.env_id}-{args.exp_name}-seed{args.seed}"
             repo_id = f"{args.hf_entity}/{repo_name}" if args.hf_entity else repo_name
-            push_to_hub(args, episodic_returns, repo_id, "PPO", f"runs/{run_name}", f"videos/{run_name}-eval")
+            push_to_hub(args, episodic_returns, repo_id, "PPO", os.path.join(args.run_dir, run_name), f"videos/{run_name}-eval")
 
     envs.close()
     writer.close()
