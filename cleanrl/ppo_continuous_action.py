@@ -184,9 +184,9 @@ def make_env(env_id, idx, capture_video, run_name, gamma, args=None, seed=0):
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = gym.wrappers.ClipAction(env)
         env = gym.wrappers.NormalizeObservation(env)
-        env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
+        env = transform_observation_compat(env, lambda obs: np.clip(obs, -10, 10))
         env = gym.wrappers.NormalizeReward(env, gamma=gamma)
-        env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
+        env = transform_reward_compat(env, lambda reward: np.clip(reward, -10, 10))
         if args is not None:
             env = apply_env_perturbations(
                 env,
@@ -204,6 +204,28 @@ def make_env(env_id, idx, capture_video, run_name, gamma, args=None, seed=0):
         return env
 
     return thunk
+
+
+def transform_observation_compat(env: gym.Env, fn):
+    # Gymnasium >=1.0 requires explicitly passing the transformed observation space.
+    try:
+        return gym.wrappers.TransformObservation(env, fn)
+    except TypeError:
+        return gym.wrappers.TransformObservation(env, fn, observation_space=env.observation_space)
+
+
+def transform_reward_compat(env: gym.Env, fn):
+    # Gymnasium >=1.0 may require an explicit reward space for transformed rewards.
+    try:
+        return gym.wrappers.TransformReward(env, fn)
+    except TypeError:
+        reward_space = gym.spaces.Box(
+            low=np.array(-10.0, dtype=np.float32),
+            high=np.array(10.0, dtype=np.float32),
+            shape=(),
+            dtype=np.float32,
+        )
+        return gym.wrappers.TransformReward(env, fn, reward_space=reward_space)
 
 
 def central_quantile_clip(x: torch.Tensor, keep_prob: float):
