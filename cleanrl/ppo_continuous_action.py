@@ -114,16 +114,28 @@ class Args:
     """scale actuator gain parameters in XML"""
     xml_actuator_bias_scale: float = 1.0
     """scale actuator bias parameters in XML"""
-    tv90_clip_value_targets: bool = False
+    tv_clip_value_targets: bool = False
     """if true, apply robust clipping/penalty to value targets"""
+    tv_clip_advantages: bool = False
+    """if true, apply robust clipping/penalty to advantages (off by default)"""
+    tv_mode: str = "fixed_cap"
+    """robust target mode: fixed_cap, upper_quantile, central_quantile, penalty"""
+    tv_fixed_cap: float | None = None
+    """fixed one-sided cap for tv_mode=fixed_cap (targets are min(target, tv_fixed_cap))"""
+    tv_keep_prob: float = 0.99
+    """quantile used by quantile modes (e.g., 0.99 keeps only the upper 99% cap)"""
+    tv_penalty_alpha: float = 0.0
+    """alpha for tv_mode=penalty: target <- target - alpha * std(target)"""
+    tv90_clip_value_targets: bool = False
+    """deprecated alias for --tv-clip-value-targets"""
     tv90_clip_advantages: bool = False
-    """if true, apply the same robust clipping rule to advantages (off by default)"""
-    tv90_mode: str = "upper"
-    """robust target mode: upper (one-sided cap), central (legacy), penalty (subtract alpha*std)"""
-    tv90_keep_prob: float = 0.99
-    """quantile used by clipping modes (e.g., 0.99 keeps only the upper 99% cap)"""
-    tv90_penalty_alpha: float = 0.0
-    """alpha for tv90_mode=penalty: target <- target - alpha * std(target)"""
+    """deprecated alias for --tv-clip-advantages"""
+    tv90_mode: str | None = None
+    """deprecated alias for --tv-mode (upper->upper_quantile, central->central_quantile)"""
+    tv90_keep_prob: float | None = None
+    """deprecated alias for --tv-keep-prob"""
+    tv90_penalty_alpha: float | None = None
+    """deprecated alias for --tv-penalty-alpha"""
 
     # to be filled in runtime
     batch_size: int = 0
@@ -196,7 +208,7 @@ def make_env(env_id, idx, capture_video, run_name, gamma, args=None, seed=0):
 
 def central_quantile_clip(x: torch.Tensor, keep_prob: float):
     if keep_prob <= 0.0 or keep_prob > 1.0:
-        raise ValueError("tv90_keep_prob must be in (0, 1].")
+        raise ValueError("tv_keep_prob must be in (0, 1].")
     if keep_prob == 1.0:
         inf = torch.tensor(float("inf"), device=x.device, dtype=x.dtype)
         return x, -inf, inf
@@ -208,12 +220,16 @@ def central_quantile_clip(x: torch.Tensor, keep_prob: float):
 
 def upper_quantile_cap(x: torch.Tensor, keep_prob: float):
     if keep_prob <= 0.0 or keep_prob > 1.0:
-        raise ValueError("tv90_keep_prob must be in (0, 1].")
+        raise ValueError("tv_keep_prob must be in (0, 1].")
     if keep_prob == 1.0:
         inf = torch.tensor(float("inf"), device=x.device, dtype=x.dtype)
         return x, inf
     upper = torch.quantile(x, keep_prob)
     return torch.clamp(x, max=upper), upper
+
+
+def fixed_upper_cap(x: torch.Tensor, cap: float):
+    return torch.clamp(x, max=cap)
 
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
@@ -274,12 +290,31 @@ def save_normalization_stats(envs, model_path: str) -> str:
 
 if __name__ == "__main__":
     args = tyro.cli(Args)
-    if args.tv90_keep_prob <= 0.0 or args.tv90_keep_prob > 1.0:
-        raise ValueError("--tv90-keep-prob must be in (0, 1].")
-    if args.tv90_mode not in {"upper", "central", "penalty"}:
-        raise ValueError("--tv90-mode must be one of: upper, central, penalty.")
-    if args.tv90_penalty_alpha < 0.0:
-        raise ValueError("--tv90-penalty-alpha must be >= 0.")
+    # Backward compatibility for older tv90_* flags.
+    if args.tv90_clip_value_targets:
+        args.tv_clip_value_targets = True
+    if args.tv90_clip_advantages:
+        args.tv_clip_advantages = True
+    if args.tv90_mode is not None:
+        legacy_mode_map = {"upper": "upper_quantile", "central": "central_quantile", "penalty": "penalty"}
+        args.tv_mode = legacy_mode_map.get(args.tv90_mode, args.tv90_mode)
+    if (args.tv90_clip_value_targets or args.tv90_clip_advantages) and args.tv90_mode is None:
+        if args.tv_mode == "fixed_cap" and args.tv_fixed_cap is None:
+            # Preserve old behavior when legacy flags are used without explicit mode.
+            args.tv_mode = "upper_quantile"
+    if args.tv90_keep_prob is not None:
+        args.tv_keep_prob = args.tv90_keep_prob
+    if args.tv90_penalty_alpha is not None:
+        args.tv_penalty_alpha = args.tv90_penalty_alpha
+
+    if args.tv_keep_prob <= 0.0 or args.tv_keep_prob > 1.0:
+        raise ValueError("--tv-keep-prob must be in (0, 1].")
+    if args.tv_mode not in {"fixed_cap", "upper_quantile", "central_quantile", "penalty"}:
+        raise ValueError("--tv-mode must be one of: fixed_cap, upper_quantile, central_quantile, penalty.")
+    if args.tv_penalty_alpha < 0.0:
+        raise ValueError("--tv-penalty-alpha must be >= 0.")
+    if args.tv_mode == "fixed_cap" and args.tv_clip_value_targets and args.tv_fixed_cap is None:
+        raise ValueError("--tv-fixed-cap must be provided when --tv-mode=fixed_cap and clipping is enabled.")
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     args.num_iterations = args.total_timesteps // args.batch_size
@@ -390,32 +425,40 @@ if __name__ == "__main__":
         b_advantages = advantages.reshape(-1)
         b_returns = returns.reshape(-1)
         b_values = values.reshape(-1)
-        tv90_return_lower = None
-        tv90_return_upper = None
-        tv90_return_penalty = None
-        tv90_return_std = None
-        tv90_adv_lower = None
-        tv90_adv_upper = None
-        tv90_adv_penalty = None
-        tv90_adv_std = None
-        if args.tv90_clip_value_targets:
-            if args.tv90_mode == "upper":
-                b_returns, tv90_return_upper = upper_quantile_cap(b_returns, args.tv90_keep_prob)
-            elif args.tv90_mode == "central":
-                b_returns, tv90_return_lower, tv90_return_upper = central_quantile_clip(b_returns, args.tv90_keep_prob)
-            elif args.tv90_mode == "penalty":
-                tv90_return_std = torch.std(b_returns, unbiased=False)
-                tv90_return_penalty = args.tv90_penalty_alpha * tv90_return_std
-                b_returns = b_returns - tv90_return_penalty
-        if args.tv90_clip_advantages:
-            if args.tv90_mode == "upper":
-                b_advantages, tv90_adv_upper = upper_quantile_cap(b_advantages, args.tv90_keep_prob)
-            elif args.tv90_mode == "central":
-                b_advantages, tv90_adv_lower, tv90_adv_upper = central_quantile_clip(b_advantages, args.tv90_keep_prob)
-            elif args.tv90_mode == "penalty":
-                tv90_adv_std = torch.std(b_advantages, unbiased=False)
-                tv90_adv_penalty = args.tv90_penalty_alpha * tv90_adv_std
-                b_advantages = b_advantages - tv90_adv_penalty
+        tv_return_lower = None
+        tv_return_upper = None
+        tv_return_penalty = None
+        tv_return_std = None
+        tv_return_fixed_cap = None
+        tv_adv_lower = None
+        tv_adv_upper = None
+        tv_adv_penalty = None
+        tv_adv_std = None
+        tv_adv_fixed_cap = None
+        if args.tv_clip_value_targets:
+            if args.tv_mode == "fixed_cap":
+                tv_return_fixed_cap = torch.tensor(float(args.tv_fixed_cap), device=b_returns.device, dtype=b_returns.dtype)
+                b_returns = fixed_upper_cap(b_returns, float(args.tv_fixed_cap))
+            elif args.tv_mode == "upper_quantile":
+                b_returns, tv_return_upper = upper_quantile_cap(b_returns, args.tv_keep_prob)
+            elif args.tv_mode == "central_quantile":
+                b_returns, tv_return_lower, tv_return_upper = central_quantile_clip(b_returns, args.tv_keep_prob)
+            elif args.tv_mode == "penalty":
+                tv_return_std = torch.std(b_returns, unbiased=False)
+                tv_return_penalty = args.tv_penalty_alpha * tv_return_std
+                b_returns = b_returns - tv_return_penalty
+        if args.tv_clip_advantages:
+            if args.tv_mode == "fixed_cap":
+                tv_adv_fixed_cap = torch.tensor(float(args.tv_fixed_cap), device=b_advantages.device, dtype=b_advantages.dtype)
+                b_advantages = fixed_upper_cap(b_advantages, float(args.tv_fixed_cap))
+            elif args.tv_mode == "upper_quantile":
+                b_advantages, tv_adv_upper = upper_quantile_cap(b_advantages, args.tv_keep_prob)
+            elif args.tv_mode == "central_quantile":
+                b_advantages, tv_adv_lower, tv_adv_upper = central_quantile_clip(b_advantages, args.tv_keep_prob)
+            elif args.tv_mode == "penalty":
+                tv_adv_std = torch.std(b_advantages, unbiased=False)
+                tv_adv_penalty = args.tv_penalty_alpha * tv_adv_std
+                b_advantages = b_advantages - tv_adv_penalty
 
         # Optimizing the policy and value network
         b_inds = np.arange(args.batch_size)
@@ -484,20 +527,24 @@ if __name__ == "__main__":
         writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
         writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
-        if tv90_return_lower is not None:
-            writer.add_scalar("robust/tv90_return_lower", tv90_return_lower.item(), global_step)
-        if tv90_return_upper is not None:
-            writer.add_scalar("robust/tv90_return_upper", tv90_return_upper.item(), global_step)
-        if tv90_return_penalty is not None:
-            writer.add_scalar("robust/tv90_return_penalty", tv90_return_penalty.item(), global_step)
-            writer.add_scalar("robust/tv90_return_std", tv90_return_std.item(), global_step)
-        if tv90_adv_lower is not None:
-            writer.add_scalar("robust/tv90_adv_lower", tv90_adv_lower.item(), global_step)
-        if tv90_adv_upper is not None:
-            writer.add_scalar("robust/tv90_adv_upper", tv90_adv_upper.item(), global_step)
-        if tv90_adv_penalty is not None:
-            writer.add_scalar("robust/tv90_adv_penalty", tv90_adv_penalty.item(), global_step)
-            writer.add_scalar("robust/tv90_adv_std", tv90_adv_std.item(), global_step)
+        if tv_return_lower is not None:
+            writer.add_scalar("robust/tv_return_lower", tv_return_lower.item(), global_step)
+        if tv_return_upper is not None:
+            writer.add_scalar("robust/tv_return_upper", tv_return_upper.item(), global_step)
+        if tv_return_fixed_cap is not None:
+            writer.add_scalar("robust/tv_return_fixed_cap", tv_return_fixed_cap.item(), global_step)
+        if tv_return_penalty is not None:
+            writer.add_scalar("robust/tv_return_penalty", tv_return_penalty.item(), global_step)
+            writer.add_scalar("robust/tv_return_std", tv_return_std.item(), global_step)
+        if tv_adv_lower is not None:
+            writer.add_scalar("robust/tv_adv_lower", tv_adv_lower.item(), global_step)
+        if tv_adv_upper is not None:
+            writer.add_scalar("robust/tv_adv_upper", tv_adv_upper.item(), global_step)
+        if tv_adv_fixed_cap is not None:
+            writer.add_scalar("robust/tv_adv_fixed_cap", tv_adv_fixed_cap.item(), global_step)
+        if tv_adv_penalty is not None:
+            writer.add_scalar("robust/tv_adv_penalty", tv_adv_penalty.item(), global_step)
+            writer.add_scalar("robust/tv_adv_std", tv_adv_std.item(), global_step)
         print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
