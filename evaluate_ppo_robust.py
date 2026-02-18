@@ -1,4 +1,5 @@
 import argparse
+import csv
 import os
 import time
 from types import SimpleNamespace
@@ -11,6 +12,17 @@ from cleanrl.ppo import Agent as PPOAgent
 from cleanrl.ppo import make_env as make_ppo_env
 from cleanrl.ppo_continuous_action import Agent as PPOContinuousAgent
 from cleanrl.ppo_continuous_action import make_env as make_ppo_continuous_env
+
+
+def interquartile_mean(x: np.ndarray) -> float:
+    if x.size == 0:
+        return float("nan")
+    lower = np.quantile(x, 0.25)
+    upper = np.quantile(x, 0.75)
+    middle = x[(x >= lower) & (x <= upper)]
+    if middle.size == 0:
+        return float(np.median(x))
+    return float(np.mean(middle))
 
 
 def find_wrapper(env: gym.Env, wrapper_cls):
@@ -158,6 +170,9 @@ def main():
     parser.add_argument("--wandb-project-name", default="cleanRL")
     parser.add_argument("--wandb-entity", default=None)
     parser.add_argument("--wandb-group", default="")
+    parser.add_argument("--metrics-out-csv", default="")
+    parser.add_argument("--model-label", default="")
+    parser.add_argument("--scenario-label", default="")
 
     parser.add_argument("--obs-noise-std", type=float, default=0.0)
     parser.add_argument("--obs-noise-clip", type=float, default=None)
@@ -205,10 +220,14 @@ def main():
     returns = np.array(episodic_returns, dtype=np.float64)
     mean_return = returns.mean()
     std_return = returns.std(ddof=1) if len(returns) > 1 else 0.0
+    median_return = np.median(returns)
+    iqm_return = interquartile_mean(returns)
     min_return = returns.min()
     max_return = returns.max()
     print(f"mean_return={mean_return:.4f}")
     print(f"std_return={std_return:.4f}")
+    print(f"median_return={median_return:.4f}")
+    print(f"iqm_return={iqm_return:.4f}")
     print(f"min_return={min_return:.4f}")
     print(f"max_return={max_return:.4f}")
 
@@ -221,6 +240,8 @@ def main():
             {
                 "eval/mean_return": mean_return,
                 "eval/std_return": std_return,
+                "eval/median_return": median_return,
+                "eval/iqm_return": iqm_return,
                 "eval/min_return": min_return,
                 "eval/max_return": max_return,
                 "eval/is_perturbed": int(is_perturbed),
@@ -229,10 +250,46 @@ def main():
         )
         wandb_run.summary["eval/mean_return"] = mean_return
         wandb_run.summary["eval/std_return"] = std_return
+        wandb_run.summary["eval/median_return"] = median_return
+        wandb_run.summary["eval/iqm_return"] = iqm_return
         wandb_run.summary["eval/min_return"] = min_return
         wandb_run.summary["eval/max_return"] = max_return
         wandb_run.summary["eval/is_perturbed"] = int(is_perturbed)
         wandb_run.finish()
+
+    if args.metrics_out_csv:
+        os.makedirs(os.path.dirname(args.metrics_out_csv) or ".", exist_ok=True)
+        row = {
+            "timestamp": int(time.time()),
+            "run_name": eval_name,
+            "algo": args.algo,
+            "env_id": args.env_id,
+            "seed": args.seed,
+            "eval_episodes": len(episodic_returns),
+            "is_perturbed": int(is_perturbed),
+            "model_label": args.model_label,
+            "scenario_label": args.scenario_label,
+            "model_path": args.model_path,
+            "norm_stats_path": args.norm_stats_path or f"{args.model_path}.norm_stats.npz",
+            "xml_perturb": int(args.xml_perturb),
+            "xml_body_mass_scale": args.xml_body_mass_scale,
+            "xml_geom_friction_scale": args.xml_geom_friction_scale,
+            "xml_joint_damping_scale": args.xml_joint_damping_scale,
+            "mean_return": float(mean_return),
+            "std_return": float(std_return),
+            "median_return": float(median_return),
+            "iqm_return": float(iqm_return),
+            "min_return": float(min_return),
+            "max_return": float(max_return),
+        }
+        header = list(row.keys())
+        write_header = not os.path.exists(args.metrics_out_csv)
+        with open(args.metrics_out_csv, "a", newline="", encoding="utf-8") as fobj:
+            writer = csv.DictWriter(fobj, fieldnames=header)
+            if write_header:
+                writer.writeheader()
+            writer.writerow(row)
+        print(f"metrics appended to {args.metrics_out_csv}")
 
 
 if __name__ == "__main__":
