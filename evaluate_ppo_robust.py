@@ -25,6 +25,33 @@ def interquartile_mean(x: np.ndarray) -> float:
     return float(np.mean(middle))
 
 
+def extract_episode_returns_from_infos(infos: dict) -> list[float]:
+    episodic_returns: list[float] = []
+
+    final_infos = infos.get("final_info")
+    if final_infos is not None:
+        for info in final_infos:
+            if info and "episode" in info:
+                episodic_returns.append(float(np.asarray(info["episode"]["r"]).item()))
+
+    if episodic_returns:
+        return episodic_returns
+
+    ep = infos.get("episode")
+    if isinstance(ep, dict) and "r" in ep:
+        rs = np.asarray(ep["r"])
+        mask = np.asarray(infos.get("_episode", np.ones_like(rs, dtype=bool)), dtype=bool)
+        if rs.shape == ():
+            if bool(mask.item() if mask.shape == () else True):
+                episodic_returns.append(float(rs.item()))
+        else:
+            for r, m in zip(rs.reshape(-1), mask.reshape(-1)):
+                if bool(m):
+                    episodic_returns.append(float(np.asarray(r).item()))
+
+    return episodic_returns
+
+
 def find_wrapper(env: gym.Env, wrapper_cls):
     current = env
     while True:
@@ -114,13 +141,11 @@ def evaluate_discrete(args: argparse.Namespace):
         with torch.no_grad():
             actions, _, _, _ = agent.get_action_and_value(torch.Tensor(obs).to(device))
         obs, _, _, _, infos = envs.step(actions.cpu().numpy())
-        if "final_info" in infos:
-            for info in infos["final_info"]:
-                if info and "episode" in info:
-                    episodic_returns.append(float(np.asarray(info["episode"]["r"]).item()))
-                    print(f"eval_episode={len(episodic_returns)-1}, episodic_return={info['episode']['r']}")
-                    if len(episodic_returns) >= args.eval_episodes:
-                        break
+        for ep_return in extract_episode_returns_from_infos(infos):
+            episodic_returns.append(ep_return)
+            print(f"eval_episode={len(episodic_returns)-1}, episodic_return={ep_return}")
+            if len(episodic_returns) >= args.eval_episodes:
+                break
     envs.close()
     return episodic_returns
 
@@ -143,13 +168,11 @@ def evaluate_continuous(args: argparse.Namespace):
         with torch.no_grad():
             actions, _, _, _ = agent.get_action_and_value(torch.Tensor(obs).to(device))
         obs, _, _, _, infos = envs.step(actions.cpu().numpy())
-        if "final_info" in infos:
-            for info in infos["final_info"]:
-                if info and "episode" in info:
-                    episodic_returns.append(float(np.asarray(info["episode"]["r"]).item()))
-                    print(f"eval_episode={len(episodic_returns)-1}, episodic_return={info['episode']['r']}")
-                    if len(episodic_returns) >= args.eval_episodes:
-                        break
+        for ep_return in extract_episode_returns_from_infos(infos):
+            episodic_returns.append(ep_return)
+            print(f"eval_episode={len(episodic_returns)-1}, episodic_return={ep_return}")
+            if len(episodic_returns) >= args.eval_episodes:
+                break
     envs.close()
     return episodic_returns
 

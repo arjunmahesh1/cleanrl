@@ -228,6 +228,36 @@ def transform_reward_compat(env: gym.Env, fn):
         return gym.wrappers.TransformReward(env, fn, reward_space=reward_space)
 
 
+def extract_episode_stats(infos: dict) -> list[tuple[float, float]]:
+    episodes: list[tuple[float, float]] = []
+
+    final_infos = infos.get("final_info")
+    if final_infos is not None:
+        for info in final_infos:
+            if info and "episode" in info:
+                ep = info["episode"]
+                episodes.append((float(np.asarray(ep["r"]).item()), float(np.asarray(ep["l"]).item())))
+
+    if episodes:
+        return episodes
+
+    # Gymnasium vector API may expose episode stats as infos["episode"] + infos["_episode"] mask.
+    ep = infos.get("episode")
+    if isinstance(ep, dict) and "r" in ep and "l" in ep:
+        rs = np.asarray(ep["r"])
+        ls = np.asarray(ep["l"])
+        mask = np.asarray(infos.get("_episode", np.ones_like(rs, dtype=bool)), dtype=bool)
+        if rs.shape == ():
+            if bool(mask.item() if mask.shape == () else True):
+                episodes.append((float(rs.item()), float(ls.item())))
+        else:
+            for r, l, m in zip(rs.reshape(-1), ls.reshape(-1), mask.reshape(-1)):
+                if bool(m):
+                    episodes.append((float(np.asarray(r).item()), float(np.asarray(l).item())))
+
+    return episodes
+
+
 def central_quantile_clip(x: torch.Tensor, keep_prob: float):
     if keep_prob <= 0.0 or keep_prob > 1.0:
         raise ValueError("tv_keep_prob must be in (0, 1].")
@@ -417,12 +447,10 @@ if __name__ == "__main__":
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
 
-            if "final_info" in infos:
-                for info in infos["final_info"]:
-                    if info and "episode" in info:
-                        print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
-                        writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
-                        writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
+            for ep_return, ep_length in extract_episode_stats(infos):
+                print(f"global_step={global_step}, episodic_return={ep_return}")
+                writer.add_scalar("charts/episodic_return", ep_return, global_step)
+                writer.add_scalar("charts/episodic_length", ep_length, global_step)
 
         # bootstrap value if not done
         with torch.no_grad():
