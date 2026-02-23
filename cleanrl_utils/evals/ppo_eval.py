@@ -1,7 +1,35 @@
 from typing import Callable
 
 import gymnasium as gym
+import numpy as np
 import torch
+
+
+def extract_episode_returns_from_infos(infos: dict) -> list[float]:
+    episodic_returns: list[float] = []
+
+    final_infos = infos.get("final_info")
+    if final_infos is not None:
+        for info in final_infos:
+            if info and "episode" in info:
+                episodic_returns.append(float(np.asarray(info["episode"]["r"]).item()))
+
+    if episodic_returns:
+        return episodic_returns
+
+    ep = infos.get("episode")
+    if isinstance(ep, dict) and "r" in ep:
+        rs = np.asarray(ep["r"])
+        mask = np.asarray(infos.get("_episode", np.ones_like(rs, dtype=bool)), dtype=bool)
+        if rs.shape == ():
+            if bool(mask.item() if mask.shape == () else True):
+                episodic_returns.append(float(rs.item()))
+        else:
+            for r, m in zip(rs.reshape(-1), mask.reshape(-1)):
+                if bool(m):
+                    episodic_returns.append(float(np.asarray(r).item()))
+
+    return episodic_returns
 
 
 def evaluate(
@@ -25,12 +53,9 @@ def evaluate(
     while len(episodic_returns) < eval_episodes:
         actions, _, _, _ = agent.get_action_and_value(torch.Tensor(obs).to(device))
         next_obs, _, _, _, infos = envs.step(actions.cpu().numpy())
-        if "final_info" in infos:
-            for info in infos["final_info"]:
-                if "episode" not in info:
-                    continue
-                print(f"eval_episode={len(episodic_returns)}, episodic_return={info['episode']['r']}")
-                episodic_returns += [info["episode"]["r"]]
+        for ep_return in extract_episode_returns_from_infos(infos):
+            print(f"eval_episode={len(episodic_returns)}, episodic_return={ep_return}")
+            episodic_returns += [ep_return]
         obs = next_obs
 
     return episodic_returns
