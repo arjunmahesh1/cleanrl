@@ -52,6 +52,48 @@ def extract_episode_returns_from_infos(infos: dict) -> list[float]:
     return episodic_returns
 
 
+def evaluate_with_hard_cap(envs, action_fn, eval_episodes: int, max_episode_steps: int, seed: int) -> list[float]:
+    """
+    Roll out exactly `eval_episodes` and force-truncate any non-terminating rollout
+    after `max_episode_steps` to avoid infinite/very-long episodes.
+    """
+    obs, _ = envs.reset(seed=seed)
+    episodic_returns: list[float] = []
+    running_return = 0.0
+    running_steps = 0
+
+    while len(episodic_returns) < eval_episodes:
+        actions = action_fn(obs)
+        obs, rewards, terminated, truncated, _ = envs.step(actions)
+
+        reward = float(np.asarray(rewards, dtype=np.float64).reshape(-1)[0])
+        done = bool(np.asarray(terminated, dtype=bool).reshape(-1)[0]) or bool(
+            np.asarray(truncated, dtype=bool).reshape(-1)[0]
+        )
+        running_return += reward
+        running_steps += 1
+
+        if done:
+            episodic_returns.append(running_return)
+            print(f"eval_episode={len(episodic_returns)-1}, episodic_return={running_return}")
+            running_return = 0.0
+            running_steps = 0
+            continue
+
+        if max_episode_steps > 0 and running_steps >= max_episode_steps:
+            episodic_returns.append(running_return)
+            print(
+                f"eval_episode={len(episodic_returns)-1}, episodic_return={running_return}, "
+                "forced_truncation=1"
+            )
+            running_return = 0.0
+            running_steps = 0
+            if len(episodic_returns) < eval_episodes:
+                obs, _ = envs.reset()
+
+    return episodic_returns
+
+
 def find_wrapper(env: gym.Env, wrapper_cls):
     current = env
     while True:
@@ -72,18 +114,25 @@ def load_normalization_stats_if_available(envs, args: argparse.Namespace) -> boo
     stats = np.load(norm_stats_path)
     env = envs.envs[0]
     obs_norm = find_wrapper(env, gym.wrappers.NormalizeObservation)
-    rew_norm = find_wrapper(env, gym.wrappers.NormalizeReward)
-    if obs_norm is None or rew_norm is None:
-        print("warning: normalization wrappers not found in eval env; cannot load normalization stats.")
+    if obs_norm is None:
+        print("warning: NormalizeObservation wrapper not found in eval env; cannot load observation stats.")
         return False
 
     obs_norm.obs_rms.mean = np.asarray(stats["obs_mean"], dtype=np.float64)
     obs_norm.obs_rms.var = np.asarray(stats["obs_var"], dtype=np.float64)
     obs_norm.obs_rms.count = float(np.asarray(stats["obs_count"], dtype=np.float64))
-    rew_norm.return_rms.mean = float(np.asarray(stats["ret_mean"], dtype=np.float64))
-    rew_norm.return_rms.var = float(np.asarray(stats["ret_var"], dtype=np.float64))
-    rew_norm.return_rms.count = float(np.asarray(stats["ret_count"], dtype=np.float64))
-    print(f"loaded normalization stats from {norm_stats_path}")
+
+    if not args.eval_raw_rewards:
+        rew_norm = find_wrapper(env, gym.wrappers.NormalizeReward)
+        if rew_norm is None:
+            print("warning: NormalizeReward wrapper not found in eval env; cannot load reward stats.")
+            return False
+        rew_norm.return_rms.mean = float(np.asarray(stats["ret_mean"], dtype=np.float64))
+        rew_norm.return_rms.var = float(np.asarray(stats["ret_var"], dtype=np.float64))
+        rew_norm.return_rms.count = float(np.asarray(stats["ret_count"], dtype=np.float64))
+        print(f"loaded observation+reward normalization stats from {norm_stats_path}")
+    else:
+        print(f"loaded observation normalization stats from {norm_stats_path} (raw rewards enabled)")
     return True
 
 
@@ -123,6 +172,7 @@ def build_perturbation_args(args: argparse.Namespace) -> SimpleNamespace:
         xml_joint_damping_scale=args.xml_joint_damping_scale,
         xml_actuator_gain_scale=args.xml_actuator_gain_scale,
         xml_actuator_bias_scale=args.xml_actuator_bias_scale,
+        eval_raw_rewards=args.eval_raw_rewards,
     )
 
 
@@ -135,17 +185,14 @@ def evaluate_discrete(args: argparse.Namespace):
     agent.load_state_dict(torch.load(args.model_path, map_location=device))
     agent.eval()
 
-    obs, _ = envs.reset(seed=args.seed)
-    episodic_returns = []
-    while len(episodic_returns) < args.eval_episodes:
+    def action_fn(obs):
         with torch.no_grad():
             actions, _, _, _ = agent.get_action_and_value(torch.Tensor(obs).to(device))
-        obs, _, _, _, infos = envs.step(actions.cpu().numpy())
-        for ep_return in extract_episode_returns_from_infos(infos):
-            episodic_returns.append(ep_return)
-            print(f"eval_episode={len(episodic_returns)-1}, episodic_return={ep_return}")
-            if len(episodic_returns) >= args.eval_episodes:
-                break
+        return actions.cpu().numpy()
+
+    episodic_returns = evaluate_with_hard_cap(
+        envs, action_fn, args.eval_episodes, args.max_episode_steps, args.seed
+    )
     envs.close()
     return episodic_returns
 
@@ -162,17 +209,14 @@ def evaluate_continuous(args: argparse.Namespace):
     agent.load_state_dict(torch.load(args.model_path, map_location=device))
     agent.eval()
 
-    obs, _ = envs.reset(seed=args.seed)
-    episodic_returns = []
-    while len(episodic_returns) < args.eval_episodes:
+    def action_fn(obs):
         with torch.no_grad():
             actions, _, _, _ = agent.get_action_and_value(torch.Tensor(obs).to(device))
-        obs, _, _, _, infos = envs.step(actions.cpu().numpy())
-        for ep_return in extract_episode_returns_from_infos(infos):
-            episodic_returns.append(ep_return)
-            print(f"eval_episode={len(episodic_returns)-1}, episodic_return={ep_return}")
-            if len(episodic_returns) >= args.eval_episodes:
-                break
+        return actions.cpu().numpy()
+
+    episodic_returns = evaluate_with_hard_cap(
+        envs, action_fn, args.eval_episodes, args.max_episode_steps, args.seed
+    )
     envs.close()
     return episodic_returns
 
@@ -184,11 +228,13 @@ def main():
     parser.add_argument("--env-id", required=True)
     parser.add_argument("--eval-episodes", type=int, default=20)
     parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--max-episode-steps", type=int, default=1000)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--capture-video", action="store_true")
     parser.add_argument("--run-name", default="")
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--norm-stats-path", default="")
+    parser.add_argument("--eval-raw-rewards", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--track", action="store_true")
     parser.add_argument("--wandb-project-name", default="cleanRL")
     parser.add_argument("--wandb-entity", default=None)
@@ -294,6 +340,7 @@ def main():
             "scenario_label": args.scenario_label,
             "model_path": args.model_path,
             "norm_stats_path": args.norm_stats_path or f"{args.model_path}.norm_stats.npz",
+            "eval_raw_rewards": int(args.eval_raw_rewards),
             "xml_perturb": int(args.xml_perturb),
             "xml_body_mass_scale": args.xml_body_mass_scale,
             "xml_geom_friction_scale": args.xml_geom_friction_scale,

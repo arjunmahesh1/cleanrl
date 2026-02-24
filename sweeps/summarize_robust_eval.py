@@ -14,6 +14,24 @@ def mean_std_ci95(values: list[float]) -> tuple[float, float, float]:
     return mean, std, ci95
 
 
+def iqm_ci95(values: list[float]) -> tuple[float, float]:
+    arr = np.asarray(values, dtype=np.float64)
+    if arr.size == 0:
+        return float("nan"), float("nan")
+    lower = np.quantile(arr, 0.25)
+    upper = np.quantile(arr, 0.75)
+    middle = arr[(arr >= lower) & (arr <= upper)]
+    if middle.size == 0:
+        middle = arr
+    iqm = float(np.mean(middle))
+    if middle.size > 1:
+        std = float(np.std(middle, ddof=1))
+        ci95 = float(1.96 * std / math.sqrt(middle.size))
+    else:
+        ci95 = 0.0
+    return iqm, ci95
+
+
 def main():
     parser = argparse.ArgumentParser(description="Summarize multi-seed robust eval metrics.")
     parser.add_argument("--metrics-csv", required=True)
@@ -147,8 +165,12 @@ def main():
                 gain_med = [b_by_seed[s]["drop_median"] - r_by_seed[s]["drop_median"] for s in common]
                 gm, _, gm_ci = mean_std_ci95(gain_mean)
                 gmed, _, gmed_ci = mean_std_ci95(gain_med)
+                giqm, giqm_ci = iqm_ci95(gain_mean)
                 print(f"Robust gain for scenario={perturbed_scenario} (baseline_drop - robust_drop, higher is better):")
-                print(f"- seeds={len(common)} | gain_mean={gm:.3f}+/-{gm_ci:.3f}, gain_median={gmed:.3f}+/-{gmed_ci:.3f}")
+                print(
+                    f"- seeds={len(common)} | gain_mean={gm:.3f}+/-{gm_ci:.3f}, "
+                    f"gain_median={gmed:.3f}+/-{gmed_ci:.3f}, gain_iqm={giqm:.3f}+/-{giqm_ci:.3f}"
+                )
                 summary_rows.append(
                     {
                         "kind": "gain",
@@ -159,8 +181,8 @@ def main():
                         "mean_return_ci95": gm_ci,
                         "median_return_mean": gmed,
                         "median_return_ci95": gmed_ci,
-                        "iqm_return_mean": float("nan"),
-                        "iqm_return_ci95": float("nan"),
+                        "iqm_return_mean": giqm,
+                        "iqm_return_ci95": giqm_ci,
                     }
                 )
 

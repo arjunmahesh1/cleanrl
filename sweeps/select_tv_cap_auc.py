@@ -53,6 +53,13 @@ def mean_std_ci95(values: list[float]) -> tuple[float, float, float]:
     return mean, std, ci95
 
 
+def integrate_trapezoid(y: np.ndarray, x: np.ndarray) -> float:
+    # NumPy 2.x uses `trapezoid`; older versions expose `trapz`.
+    if hasattr(np, "trapezoid"):
+        return float(np.trapezoid(y, x))
+    return float(np.trapz(y, x))
+
+
 def main():
     parser = argparse.ArgumentParser(description="Select fixed TV cap by normalized AUC.")
     parser.add_argument("--run-dir", required=True)
