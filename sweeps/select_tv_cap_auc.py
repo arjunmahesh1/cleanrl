@@ -90,7 +90,7 @@ def main():
         if curve is None:
             continue
         steps, vals = curve
-        auc = float(np.trapz(vals, steps))
+        auc = float(np.trapezoid(vals, steps)) if hasattr(np, 'trapezoid') else float(np.trapz(vals, steps))
         max_step = float(np.max(steps))
         auc_norm = float(auc / max_step) if max_step > 0 else float("nan")
         rows.append(
