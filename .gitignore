@@ -1,3 +1,8 @@
+slurm-*.out
+.claude/
+cluster_rl_runs/
+cluster_slurm_logs/
+nul
 slurm
 .aim
 runs
