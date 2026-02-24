@@ -185,8 +185,11 @@ def make_env(env_id, idx, capture_video, run_name, gamma, args=None, seed=0):
         env = gym.wrappers.ClipAction(env)
         env = gym.wrappers.NormalizeObservation(env)
         env = transform_observation_compat(env, lambda obs: np.clip(obs, -10, 10))
-        env = gym.wrappers.NormalizeReward(env, gamma=gamma)
-        env = transform_reward_compat(env, lambda reward: np.clip(reward, -10, 10))
+        # Evaluation can request raw reward reporting while still using normalized observations.
+        eval_raw_rewards = bool(getattr(args, "eval_raw_rewards", False)) if args is not None else False
+        if not eval_raw_rewards:
+            env = gym.wrappers.NormalizeReward(env, gamma=gamma)
+            env = transform_reward_compat(env, lambda reward: np.clip(reward, -10, 10))
         if args is not None:
             env = apply_env_perturbations(
                 env,
