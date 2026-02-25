@@ -5,6 +5,8 @@ cluster_slurm_logs/
 cluster_artifacts/
 raw_eval_bundle_*.tar.gz
 raw_eval_bundle_*/
+friction_0p5_2p0_bundle_*.tar.gz
+friction_0p5_2p0_bundle_*/
 sweeps_backup_*/
 sweeps/ppo_robust_summary.recomputed.csv
 sweeps/metrics/seed_*.csv
