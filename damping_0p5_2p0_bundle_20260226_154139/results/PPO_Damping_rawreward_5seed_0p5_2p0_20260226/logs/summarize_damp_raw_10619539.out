@@ -1,0 +1,86 @@
+Per-group summary (across seeds):
+- model=tv, scenario=damping_0p5, n=5 | mean=3192.247+/-652.385, median=3462.095+/-889.801, iqm=3400.819+/-873.320
+- model=tv, scenario=damping_0p6, n=5 | mean=3190.741+/-652.171, median=3437.791+/-876.008, iqm=3415.358+/-825.745
+- model=tv, scenario=damping_0p7, n=5 | mean=3205.278+/-637.997, median=3350.839+/-869.126, iqm=3420.684+/-807.946
+- model=tv, scenario=damping_0p8, n=5 | mean=3120.560+/-780.524, median=3236.138+/-990.623, iqm=3238.393+/-968.764
+- model=tv, scenario=damping_0p9, n=5 | mean=3061.328+/-753.943, median=3174.482+/-1026.040, iqm=3195.033+/-975.607
+- model=tv, scenario=damping_1p1, n=5 | mean=3190.375+/-685.648, median=3406.916+/-922.557, iqm=3372.749+/-873.552
+- model=tv, scenario=damping_1p3, n=5 | mean=3098.162+/-703.901, median=3301.889+/-934.308, iqm=3272.825+/-874.858
+- model=tv, scenario=damping_1p5, n=5 | mean=2997.983+/-707.059, median=3129.389+/-1060.112, iqm=3150.951+/-984.589
+- model=tv, scenario=damping_1p7, n=5 | mean=3060.427+/-750.531, median=3171.083+/-1025.802, iqm=3205.420+/-997.670
+- model=tv, scenario=damping_2p0, n=5 | mean=3094.301+/-677.789, median=3216.754+/-1006.698, iqm=3251.245+/-914.808
+- model=tv, scenario=nominal, n=5 | mean=3167.207+/-659.170, median=3388.623+/-868.080, iqm=3350.154+/-858.457
+- model=vanilla, scenario=damping_0p5, n=5 | mean=3185.453+/-674.039, median=3369.777+/-895.002, iqm=3382.740+/-847.614
+- model=vanilla, scenario=damping_0p6, n=5 | mean=3186.772+/-571.358, median=3498.871+/-709.111, iqm=3416.184+/-691.875
+- model=vanilla, scenario=damping_0p7, n=5 | mean=3157.140+/-721.553, median=3223.284+/-962.974, iqm=3288.551+/-922.501
+- model=vanilla, scenario=damping_0p8, n=5 | mean=3129.566+/-697.423, median=3305.569+/-1014.275, iqm=3314.432+/-960.618
+- model=vanilla, scenario=damping_0p9, n=5 | mean=3169.503+/-699.715, median=3316.925+/-922.538, iqm=3326.367+/-900.769
+- model=vanilla, scenario=damping_1p1, n=5 | mean=3177.399+/-688.974, median=3380.148+/-929.227, iqm=3367.155+/-906.479
+- model=vanilla, scenario=damping_1p3, n=5 | mean=3056.424+/-649.958, median=3249.824+/-937.658, iqm=3242.466+/-936.315
+- model=vanilla, scenario=damping_1p5, n=5 | mean=3147.456+/-764.960, median=3286.336+/-980.221, iqm=3281.618+/-916.571
+- model=vanilla, scenario=damping_1p7, n=5 | mean=3088.561+/-773.626, median=3209.091+/-1002.506, iqm=3209.949+/-973.608
+- model=vanilla, scenario=damping_2p0, n=5 | mean=3098.019+/-675.552, median=3197.362+/-981.677, iqm=3254.326+/-914.424
+- model=vanilla, scenario=nominal, n=5 | mean=3046.226+/-704.054, median=3339.275+/-959.670, iqm=3234.242+/-950.844
+
+Drop summary for scenario=damping_0p5 (nominal - perturbed, lower is better):
+- model=tv, n=5 | drop_mean=-25.040+/-69.352, drop_median=-73.472+/-176.799, rel_drop=-0.008+/-0.023
+- model=vanilla, n=5 | drop_mean=-139.227+/-105.889, drop_median=-30.502+/-124.619, rel_drop=-0.053+/-0.052
+Robust gain for scenario=damping_0p5 (baseline_drop - robust_drop, higher is better):
+- seeds=5 | gain_mean=-114.188+/-159.590, gain_median=42.971+/-283.608, gain_iqm=-85.640+/-171.153
+
+Drop summary for scenario=damping_0p6 (nominal - perturbed, lower is better):
+- model=tv, n=5 | drop_mean=-23.534+/-40.669, drop_median=-49.168+/-111.304, rel_drop=-0.008+/-0.013
+- model=vanilla, n=5 | drop_mean=-140.546+/-238.842, drop_median=-159.595+/-335.692, rel_drop=-0.066+/-0.108
+Robust gain for scenario=damping_0p6 (baseline_drop - robust_drop, higher is better):
+- seeds=5 | gain_mean=-117.012+/-220.297, gain_median=-110.428+/-412.251, gain_iqm=-75.512+/-52.959
+
+Drop summary for scenario=damping_0p7 (nominal - perturbed, lower is better):
+- model=tv, n=5 | drop_mean=-38.071+/-107.841, drop_median=37.784+/-137.686, rel_drop=-0.015+/-0.039
+- model=vanilla, n=5 | drop_mean=-110.914+/-133.115, drop_median=115.991+/-324.639, rel_drop=-0.040+/-0.051
+Robust gain for scenario=damping_0p7 (baseline_drop - robust_drop, higher is better):
+- seeds=5 | gain_mean=-72.843+/-104.226, gain_median=78.207+/-207.867, gain_iqm=-72.697+/-91.158
+
+Drop summary for scenario=damping_0p8 (nominal - perturbed, lower is better):
+- model=tv, n=5 | drop_mean=46.648+/-181.533, drop_median=152.485+/-146.283, rel_drop=0.023+/-0.057
+- model=vanilla, n=5 | drop_mean=-83.340+/-116.664, drop_median=33.706+/-209.361, rel_drop=-0.031+/-0.044
+Robust gain for scenario=damping_0p8 (baseline_drop - robust_drop, higher is better):
+- seeds=5 | gain_mean=-129.988+/-218.652, gain_median=-118.779+/-159.320, gain_iqm=-177.859+/-94.560
+
+Drop summary for scenario=damping_0p9 (nominal - perturbed, lower is better):
+- model=tv, n=5 | drop_mean=105.880+/-101.120, drop_median=214.140+/-166.589, rel_drop=0.041+/-0.037
+- model=vanilla, n=5 | drop_mean=-123.277+/-107.159, drop_median=22.351+/-213.481, rel_drop=-0.045+/-0.046
+Robust gain for scenario=damping_0p9 (baseline_drop - robust_drop, higher is better):
+- seeds=5 | gain_mean=-229.157+/-163.574, gain_median=-191.790+/-273.260, gain_iqm=-222.528+/-159.131
+
+Drop summary for scenario=damping_1p1 (nominal - perturbed, lower is better):
+- model=tv, n=5 | drop_mean=-23.168+/-61.293, drop_median=-18.294+/-152.379, rel_drop=-0.006+/-0.022
+- model=vanilla, n=5 | drop_mean=-131.173+/-78.681, drop_median=-40.873+/-93.427, rel_drop=-0.047+/-0.028
+Robust gain for scenario=damping_1p1 (baseline_drop - robust_drop, higher is better):
+- seeds=5 | gain_mean=-108.004+/-125.828, gain_median=-22.579+/-231.763, gain_iqm=-116.751+/-156.432
+
+Drop summary for scenario=damping_1p3 (nominal - perturbed, lower is better):
+- model=tv, n=5 | drop_mean=69.045+/-125.020, drop_median=86.733+/-73.281, rel_drop=0.025+/-0.040
+- model=vanilla, n=5 | drop_mean=-10.198+/-100.442, drop_median=89.451+/-309.665, rel_drop=-0.010+/-0.045
+Robust gain for scenario=damping_1p3 (baseline_drop - robust_drop, higher is better):
+- seeds=5 | gain_mean=-79.243+/-207.474, gain_median=2.718+/-308.746, gain_iqm=-56.241+/-234.870
+
+Drop summary for scenario=damping_1p5 (nominal - perturbed, lower is better):
+- model=tv, n=5 | drop_mean=169.225+/-87.386, drop_median=259.234+/-241.117, rel_drop=0.059+/-0.037
+- model=vanilla, n=5 | drop_mean=-101.230+/-175.431, drop_median=52.940+/-189.337, rel_drop=-0.035+/-0.058
+Robust gain for scenario=damping_1p5 (baseline_drop - robust_drop, higher is better):
+- seeds=5 | gain_mean=-270.455+/-193.991, gain_median=-206.294+/-299.392, gain_iqm=-304.191+/-177.059
+
+Drop summary for scenario=damping_1p7 (nominal - perturbed, lower is better):
+- model=tv, n=5 | drop_mean=106.781+/-117.143, drop_median=217.540+/-214.543, rel_drop=0.042+/-0.049
+- model=vanilla, n=5 | drop_mean=-42.335+/-119.051, drop_median=130.184+/-275.999, rel_drop=-0.010+/-0.037
+Robust gain for scenario=damping_1p7 (baseline_drop - robust_drop, higher is better):
+- seeds=5 | gain_mean=-149.115+/-101.497, gain_median=-87.355+/-177.194, gain_iqm=-133.331+/-67.370
+
+Drop summary for scenario=damping_2p0 (nominal - perturbed, lower is better):
+- model=tv, n=5 | drop_mean=72.906+/-26.323, drop_median=171.868+/-147.192, rel_drop=0.025+/-0.011
+- model=vanilla, n=5 | drop_mean=-51.793+/-135.062, drop_median=141.914+/-332.389, rel_drop=-0.024+/-0.061
+Robust gain for scenario=damping_2p0 (baseline_drop - robust_drop, higher is better):
+- seeds=5 | gain_mean=-124.699+/-136.529, gain_median=-29.955+/-307.700, gain_iqm=-107.318+/-16.758
+
+summary written to sweeps/ppo_robust_summary_damping_0p5_2p0.csv
+wrote sweeps/ppo_robust_gain_all_stats_damping_0p5_2p0.csv
