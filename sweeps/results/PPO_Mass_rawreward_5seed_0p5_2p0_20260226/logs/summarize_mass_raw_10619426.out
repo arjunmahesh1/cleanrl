@@ -1,0 +1,88 @@
+Per-group summary (across seeds):
+- model=tv, scenario=mass_0p5, n=5 | mean=3179.101+/-683.395, median=3320.737+/-980.116, iqm=3333.995+/-880.985
+- model=tv, scenario=mass_0p6, n=5 | mean=3138.488+/-685.842, median=3303.864+/-915.954, iqm=3310.665+/-901.786
+- model=tv, scenario=mass_0p7, n=5 | mean=3079.932+/-693.532, median=3244.419+/-971.229, iqm=3255.891+/-943.622
+- model=tv, scenario=mass_0p8, n=5 | mean=3136.466+/-784.380, median=3206.140+/-1020.413, iqm=3262.861+/-973.581
+- model=tv, scenario=mass_0p9, n=5 | mean=3128.244+/-675.138, median=3293.442+/-955.082, iqm=3277.475+/-893.931
+- model=tv, scenario=mass_1p1, n=5 | mean=3127.036+/-720.113, median=3329.726+/-922.257, iqm=3295.572+/-897.781
+- model=tv, scenario=mass_1p3, n=5 | mean=3133.126+/-681.943, median=3369.831+/-949.868, iqm=3333.114+/-923.825
+- model=tv, scenario=mass_1p5, n=5 | mean=3070.023+/-654.340, median=3214.352+/-978.010, iqm=3256.612+/-931.289
+- model=tv, scenario=mass_1p7, n=5 | mean=3034.059+/-727.233, median=3172.358+/-1025.918, iqm=3201.455+/-988.964
+- model=tv, scenario=mass_2p0, n=5 | mean=3149.665+/-709.912, median=3291.476+/-988.355, iqm=3317.006+/-927.152
+- model=tv, scenario=nominal, n=5 | mean=3090.891+/-767.687, median=3158.771+/-1037.781, iqm=3191.300+/-965.847
+- model=vanilla, scenario=mass_0p5, n=5 | mean=3088.049+/-634.186, median=3215.276+/-946.624, iqm=3239.356+/-883.080
+- model=vanilla, scenario=mass_0p6, n=5 | mean=3198.413+/-699.495, median=3371.013+/-918.745, iqm=3378.246+/-860.629
+- model=vanilla, scenario=mass_0p7, n=5 | mean=3124.038+/-704.318, median=3368.395+/-961.692, iqm=3314.039+/-918.926
+- model=vanilla, scenario=mass_0p8, n=5 | mean=3184.088+/-753.155, median=3338.900+/-929.704, iqm=3300.571+/-884.608
+- model=vanilla, scenario=mass_0p9, n=5 | mean=3077.872+/-596.039, median=3311.021+/-869.049, iqm=3302.658+/-776.544
+- model=vanilla, scenario=mass_1p1, n=5 | mean=3166.042+/-762.393, median=3276.788+/-962.381, iqm=3279.773+/-946.619
+- model=vanilla, scenario=mass_1p3, n=5 | mean=3120.734+/-666.767, median=3253.314+/-921.607, iqm=3277.880+/-853.688
+- model=vanilla, scenario=mass_1p5, n=5 | mean=3200.272+/-710.771, median=3448.519+/-897.758, iqm=3390.366+/-881.606
+- model=vanilla, scenario=mass_1p7, n=5 | mean=3141.586+/-705.306, median=3321.678+/-948.209, iqm=3323.832+/-919.105
+- model=vanilla, scenario=mass_2p0, n=5 | mean=3096.887+/-646.907, median=3299.809+/-913.122, iqm=3271.056+/-852.414
+- model=vanilla, scenario=nominal, n=5 | mean=3143.106+/-603.716, median=3365.340+/-848.940, iqm=3378.993+/-824.681
+
+Drop summary for scenario=mass_0p5 (nominal - perturbed, lower is better):
+- model=tv, n=5 | drop_mean=-88.210+/-97.386, drop_median=-161.966+/-238.363, rel_drop=-0.037+/-0.037
+- model=vanilla, n=5 | drop_mean=55.057+/-147.867, drop_median=150.065+/-163.132, rel_drop=0.018+/-0.044
+Robust gain for scenario=mass_0p5 (baseline_drop - robust_drop, higher is better):
+- seeds=5 | gain_mean=143.267+/-212.885, gain_median=312.031+/-288.712, gain_iqm=203.419+/-146.346
+
+Drop summary for scenario=mass_0p6 (nominal - perturbed, lower is better):
+- model=tv, n=5 | drop_mean=-47.596+/-127.173, drop_median=-145.092+/-128.526, rel_drop=-0.023+/-0.037
+- model=vanilla, n=5 | drop_mean=-55.306+/-189.329, drop_median=-5.673+/-308.238, rel_drop=-0.013+/-0.063
+Robust gain for scenario=mass_0p6 (baseline_drop - robust_drop, higher is better):
+- seeds=5 | gain_mean=-7.710+/-305.306, gain_median=139.419+/-357.356, gain_iqm=50.269+/-304.726
+
+Drop summary for scenario=mass_0p7 (nominal - perturbed, lower is better):
+- model=tv, n=5 | drop_mean=10.960+/-173.748, drop_median=-85.648+/-87.233, rel_drop=-0.002+/-0.044
+- model=vanilla, n=5 | drop_mean=19.068+/-198.487, drop_median=-3.055+/-431.444, rel_drop=0.011+/-0.067
+Robust gain for scenario=mass_0p7 (baseline_drop - robust_drop, higher is better):
+- seeds=5 | gain_mean=8.108+/-326.716, gain_median=82.593+/-403.557, gain_iqm=74.759+/-274.334
+
+Drop summary for scenario=mass_0p8 (nominal - perturbed, lower is better):
+- model=tv, n=5 | drop_mean=-45.575+/-248.522, drop_median=-47.369+/-348.222, rel_drop=-0.016+/-0.093
+- model=vanilla, n=5 | drop_mean=-40.982+/-243.755, drop_median=26.441+/-319.178, rel_drop=-0.007+/-0.069
+Robust gain for scenario=mass_0p8 (baseline_drop - robust_drop, higher is better):
+- seeds=5 | gain_mean=4.593+/-424.931, gain_median=73.809+/-628.097, gain_iqm=-6.454+/-426.364
+
+Drop summary for scenario=mass_0p9 (nominal - perturbed, lower is better):
+- model=tv, n=5 | drop_mean=-37.353+/-106.684, drop_median=-134.670+/-137.902, rel_drop=-0.020+/-0.035
+- model=vanilla, n=5 | drop_mean=65.234+/-201.674, drop_median=54.319+/-55.906, rel_drop=0.018+/-0.056
+Robust gain for scenario=mass_0p9 (baseline_drop - robust_drop, higher is better):
+- seeds=5 | gain_mean=102.587+/-268.313, gain_median=188.990+/-147.404, gain_iqm=111.419+/-165.818
+
+Drop summary for scenario=mass_1p1 (nominal - perturbed, lower is better):
+- model=tv, n=5 | drop_mean=-36.145+/-71.498, drop_median=-170.955+/-162.468, rel_drop=-0.016+/-0.026
+- model=vanilla, n=5 | drop_mean=-22.936+/-182.661, drop_median=88.553+/-179.375, rel_drop=0.002+/-0.054
+Robust gain for scenario=mass_1p1 (baseline_drop - robust_drop, higher is better):
+- seeds=5 | gain_mean=13.209+/-245.012, gain_median=259.508+/-275.470, gain_iqm=29.586+/-173.202
+
+Drop summary for scenario=mass_1p3 (nominal - perturbed, lower is better):
+- model=tv, n=5 | drop_mean=-42.234+/-170.416, drop_median=-211.060+/-241.413, rel_drop=-0.021+/-0.045
+- model=vanilla, n=5 | drop_mean=22.372+/-153.702, drop_median=112.026+/-145.672, rel_drop=0.010+/-0.041
+Robust gain for scenario=mass_1p3 (baseline_drop - robust_drop, higher is better):
+- seeds=5 | gain_mean=64.607+/-312.986, gain_median=323.086+/-313.429, gain_iqm=147.711+/-73.905
+
+Drop summary for scenario=mass_1p5 (nominal - perturbed, lower is better):
+- model=tv, n=5 | drop_mean=20.868+/-161.771, drop_median=-55.581+/-105.332, rel_drop=-0.002+/-0.047
+- model=vanilla, n=5 | drop_mean=-57.166+/-186.396, drop_median=-83.179+/-400.031, rel_drop=-0.013+/-0.065
+Robust gain for scenario=mass_1p5 (baseline_drop - robust_drop, higher is better):
+- seeds=5 | gain_mean=-78.034+/-334.913, gain_median=-27.598+/-460.340, gain_iqm=-44.536+/-297.361
+
+Drop summary for scenario=mass_1p7 (nominal - perturbed, lower is better):
+- model=tv, n=5 | drop_mean=56.832+/-145.043, drop_median=-13.587+/-50.894, rel_drop=0.017+/-0.040
+- model=vanilla, n=5 | drop_mean=1.520+/-124.496, drop_median=43.663+/-223.335, rel_drop=0.007+/-0.046
+Robust gain for scenario=mass_1p7 (baseline_drop - robust_drop, higher is better):
+- seeds=5 | gain_mean=-55.313+/-207.561, gain_median=57.249+/-249.735, gain_iqm=11.940+/-161.133
+
+Drop summary for scenario=mass_2p0 (nominal - perturbed, lower is better):
+- model=tv, n=5 | drop_mean=-58.774+/-134.622, drop_median=-132.704+/-158.653, rel_drop=-0.025+/-0.042
+- model=vanilla, n=5 | drop_mean=46.219+/-172.895, drop_median=65.532+/-232.036, rel_drop=0.016+/-0.053
+Robust gain for scenario=mass_2p0 (baseline_drop - robust_drop, higher is better):
+- seeds=5 | gain_mean=104.993+/-296.805, gain_median=198.236+/-164.175, gain_iqm=132.011+/-316.277
+
+summary written to sweeps/ppo_robust_summary_mass_0p5_2p0.csv
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+ModuleNotFoundError: No module named 'pandas'
