@@ -2,6 +2,12 @@
 
 This directory is the running registry of completed experiment snapshots.
 
+## Methodology setup snapshots
+
+| Setup | Purpose | Files |
+| --- | --- | --- |
+| Percentile fixed-cap Phase 1 setup | Shared TV caps derived from converged vanilla PPO returns (last 25% of training) for candidate percentiles `75/85/90/95` | `sweeps/results/PPO_PercentileFixedCap_setup_20260226/README.md` |
+
 ## Completed experiments
 
 | Experiment | Seeds | Perturbation setup | Main result (mean +/- 95% CI) | Verdict | Files |
