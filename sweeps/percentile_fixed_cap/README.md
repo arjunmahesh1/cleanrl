@@ -16,3 +16,7 @@ Replace the current AUC-selected absolute cap with a more defensible shared cap 
 - `p85 = 4267.1008`
 - `p90 = 4292.8940`
 - `p95 = 4324.8652`
+
+## Phase 1 selection
+
+- Current carry-forward candidate: `p95`

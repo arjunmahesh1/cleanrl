@@ -32,6 +32,10 @@ Method:
 - `cap_p75.txt`, `cap_p85.txt`, `cap_p90.txt`, `cap_p95.txt`: single-cap text files for cluster use.
 - `shared_caps.env`: shell-friendly exported cap values.
 
-## Next step
+## Phase 1 outcome
 
-Retrain TV PPO using these four candidate caps in a fresh run directory such as `~/rl_runs_pctcap_phase1`, then evaluate nominal + single-axis sweeps and select the best percentile cap.
+Phase 1 retraining + single-axis evaluation completed in:
+- `sweeps/results/PPO_PercentileFixedCap_phase1_eval_20260302/README.md`
+
+Selected candidate to carry forward:
+- `p95 = 4324.8652`

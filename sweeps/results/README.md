@@ -17,6 +17,7 @@ This directory is the running registry of completed experiment snapshots.
 | PPO friction-only robustness (raw reward, extended grid) | 5 | `mass=1.0`, `damping=1.0`, friction grid `{0.5,0.6,0.7,0.8,0.9,1.1,1.3,1.5,1.7,2.0}` | Nominal: TV `3144.68 +/- 721.99`, Vanilla `3084.97 +/- 688.99` | TV absolute return is close to vanilla, but robustness gain is not consistently positive | `sweeps/results/PPO_Friction_rawreward_5seed_0p5_2p0_20260225/README.md` |
 | PPO mass-only robustness (raw reward, extended grid) | 5 | `friction=1.0`, `damping=1.0`, mass grid `{0.5,0.6,0.7,0.8,0.9,1.1,1.3,1.5,1.7,2.0}` | Nominal: TV `3090.89 +/- 767.69`, Vanilla `3143.11 +/- 603.72` | Mild positive trend for TV under mass shifts, but wide CIs at 5 seeds | `sweeps/results/PPO_Mass_rawreward_5seed_0p5_2p0_20260226/README.md` |
 | PPO damping-only robustness (raw reward, extended grid) | 5 | `mass=1.0`, `friction=1.0`, damping grid `{0.5,0.6,0.7,0.8,0.9,1.1,1.3,1.5,1.7,2.0}` | Nominal: TV `3167.21 +/- 659.17`, Vanilla `3046.23 +/- 704.05` | TV has higher nominal return, but robustness gains are consistently negative under damping shifts | `sweeps/results/PPO_Damping_rawreward_5seed_0p5_2p0_20260226/README.md` |
+| PPO percentile fixed-cap Phase 1 selection | 5 | Retrained TV with shared caps from vanilla return percentiles (`p75/p85/p90/p95`), then evaluated on friction + mass + damping single-axis sweeps | Best candidate: `p95`; nominal TV `2802.50 +/- 431.43` vs vanilla `3191.57 +/- 697.85` | `p95` has the strongest overall drop-based robustness, but nominal-gap confounding remains and only high-friction settings show clear absolute TV wins | `sweeps/results/PPO_PercentileFixedCap_phase1_eval_20260302/README.md` |
 
 ## Friction-only result table (extended grid canonical run)
 
@@ -84,6 +85,38 @@ Extended-grid summary:
 - Mean-gain CI excludes zero in `3 / 10` scenarios
 - IQM-gain CI excludes zero in `6 / 10` scenarios
 
+## Percentile fixed-cap Phase 1 selection summary
+
+Goal:
+- replace the earlier AUC-selected fixed cap with a more defensible percentile-based cap,
+- retrain TV PPO for `p75/p85/p90/p95`,
+- choose the candidate to carry into action-noise, pairwise, and adversarial-search phases.
+
+Metric alignment:
+- `nominal return` checks whether robustness is being purchased by weakening the base policy;
+- `perturbed return` is the cleanest practical robustness metric;
+- `drop = nominal - perturbed` measures sensitivity to perturbation;
+- `robust gain = vanilla_drop - tv_drop` is positive when TV degrades less than vanilla, but can be inflated if TV starts from a much lower nominal return.
+
+Candidate summary:
+
+| Cap | Shared cap | TV nominal | Vanilla nominal | Avg gain: friction | Avg gain: mass | Avg gain: damping | Interpretation |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| p75 | `4196.32` | `2744.57` | `3095.46` | `+166.24` | `-48.19` | `-19.10` | Smallest nominal deficit, but mixed robustness overall |
+| p85 | `4267.10` | `2457.80` | `3114.47` | `+272.23` | `+46.54` | `+89.17` | Strong drop-based gains, but the largest nominal deficit |
+| p90 | `4292.89` | `2624.24` | `3168.00` | `+145.53` | `+12.69` | `+16.57` | Mildly positive, but weaker than `p95` |
+| p95 | `4324.87` | `2802.50` | `3191.57` | `+308.62` | `+98.47` | `+82.01` | Best overall candidate; strongest combined robustness profile |
+
+Phase 1 takeaway:
+- `p95` is the best candidate to carry forward.
+- High-friction settings provide the clearest absolute TV wins:
+  - `friction_1p3`: TV `2957.06` vs vanilla `2334.69`
+  - `friction_1p5`: TV `2045.85` vs vanilla `1623.43`
+  - `friction_1p7`: TV `1362.07` vs vanilla `1058.08`
+  - `friction_2p0`: TV `854.79` vs vanilla `550.69`
+- Mass and damping improve substantially in drop-space under `p95`, but TV still trails vanilla in absolute perturbed return on those axes.
+- The nominal deficit remains the main caveat for interpretation and should be investigated before making strong general claims.
+
 ## Canonical files
 
 - Current canonical aggregated files in `sweeps/`:
@@ -101,3 +134,5 @@ Extended-grid summary:
   - `sweeps/results/PPO_Friction_rawreward_5seed_0p5_2p0_20260225/`
   - `sweeps/results/PPO_Mass_rawreward_5seed_0p5_2p0_20260226/`
   - `sweeps/results/PPO_Damping_rawreward_5seed_0p5_2p0_20260226/`
+  - `sweeps/results/PPO_PercentileFixedCap_setup_20260226/`
+  - `sweeps/results/PPO_PercentileFixedCap_phase1_eval_20260302/`
