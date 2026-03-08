@@ -1,0 +1,12 @@
+wrote /home/users/am1015/cleanrl/sweeps/ppo_compare_alpha_mass_fine_metrics.csv
+wrote /home/users/am1015/cleanrl/sweeps/results/PPO_FixedAlphaFine_vs_P95_mass_20260307/curve_points.csv
+wrote /home/users/am1015/cleanrl/sweeps/results/PPO_FixedAlphaFine_vs_P95_mass_20260307/mass_curve.png
+AUC ranking:
+model_label         auc
+   tv_a4000 4906.615334
+    vanilla 4693.778977
+   tv_a3900 4387.316438
+     tv_p95 4252.730275
+   tv_a4100 4155.693097
+   tv_a4200 3967.978467
+   tv_a3800 3811.320330

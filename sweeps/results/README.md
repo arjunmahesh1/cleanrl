@@ -18,6 +18,7 @@ This directory is the running registry of completed experiment snapshots.
 | PPO mass-only robustness (raw reward, extended grid) | 5 | `friction=1.0`, `damping=1.0`, mass grid `{0.5,0.6,0.7,0.8,0.9,1.1,1.3,1.5,1.7,2.0}` | Nominal: TV `3090.89 +/- 767.69`, Vanilla `3143.11 +/- 603.72` | Mild positive trend for TV under mass shifts, but wide CIs at 5 seeds | `sweeps/results/PPO_Mass_rawreward_5seed_0p5_2p0_20260226/README.md` |
 | PPO damping-only robustness (raw reward, extended grid) | 5 | `mass=1.0`, `friction=1.0`, damping grid `{0.5,0.6,0.7,0.8,0.9,1.1,1.3,1.5,1.7,2.0}` | Nominal: TV `3167.21 +/- 659.17`, Vanilla `3046.23 +/- 704.05` | TV has higher nominal return, but robustness gains are consistently negative under damping shifts | `sweeps/results/PPO_Damping_rawreward_5seed_0p5_2p0_20260226/README.md` |
 | PPO percentile fixed-cap Phase 1 selection | 5 | Retrained TV with shared caps from vanilla return percentiles (`p75/p85/p90/p95`), then evaluated on friction + mass + damping single-axis sweeps | Best candidate: `p95`; nominal TV `2802.50 +/- 431.43` vs vanilla `3191.57 +/- 697.85` | `p95` has the strongest overall drop-based robustness, but nominal-gap confounding remains and only high-friction settings show clear absolute TV wins | `sweeps/results/PPO_PercentileFixedCap_phase1_eval_20260302/README.md` |
+| PPO fixed-alpha mass (coarse + fine, raw reward) | 5 | Mass grid `{0.5,0.6,0.7,0.8,0.9,1.0,1.1,1.3,1.5,1.7,2.0}` with `friction=1.0`, `damping=1.0`; compare `vanilla`, `tv_p95`, fixed-alpha | Best candidate: `tv_a4000`; AUC coarse/fine `4897.43 / 4906.62` | `tv_a4000` is best in both coarse and fine mass sweeps and beats `vanilla` and `tv_p95` by AUC | `sweeps/results/PPO_FixedAlpha_mass_20260307/README.md` |
 
 ## Friction-only result table (extended grid canonical run)
 
@@ -129,6 +130,8 @@ Phase 1 takeaway:
   - `sweeps/ppo_robust_eval_metrics_damping_0p5_2p0.csv`
   - `sweeps/ppo_robust_summary_damping_0p5_2p0.csv`
   - `sweeps/ppo_robust_gain_all_stats_damping_0p5_2p0.csv`
+  - `sweeps/ppo_compare_alpha_mass_coarse_metrics.csv`
+  - `sweeps/ppo_compare_alpha_mass_fine_metrics.csv`
 - Frozen snapshots:
   - `sweeps/results/PPO_Friction_rawreward_5seed_20260224/`
   - `sweeps/results/PPO_Friction_rawreward_5seed_0p5_2p0_20260225/`
@@ -136,3 +139,4 @@ Phase 1 takeaway:
   - `sweeps/results/PPO_Damping_rawreward_5seed_0p5_2p0_20260226/`
   - `sweeps/results/PPO_PercentileFixedCap_setup_20260226/`
   - `sweeps/results/PPO_PercentileFixedCap_phase1_eval_20260302/`
+  - `sweeps/results/PPO_FixedAlpha_mass_20260307/`
