@@ -1,0 +1,9 @@
+wrote /home/users/am1015/cleanrl/sweeps/ppo_compare_alpha_damping_coarse_metrics.csv
+model_label         auc
+   tv_a4000 4870.307144
+    vanilla 4715.251715
+   tv_a3600 4354.461213
+     tv_p95 4229.680566
+   tv_a4400 4158.904770
+   tv_a4800 3926.754251
+   tv_a3200 3760.661454
