@@ -136,6 +136,8 @@ class Args:
     """deprecated alias for --tv-keep-prob"""
     tv90_penalty_alpha: float | None = None
     """deprecated alias for --tv-penalty-alpha"""
+    enforce_full_determinism: bool = False
+    """if true, force deterministic CUDA/torch behavior (slower, for reproducibility checks)"""
 
     # to be filled in runtime
     batch_size: int = 0
@@ -397,7 +399,15 @@ if __name__ == "__main__":
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(args.seed)
+        torch.cuda.manual_seed_all(args.seed)
     torch.backends.cudnn.deterministic = args.torch_deterministic
+    torch.backends.cudnn.benchmark = not args.torch_deterministic
+    if args.enforce_full_determinism:
+        torch.backends.cudnn.benchmark = False
+        # For reproducibility checks we fail fast if any non-deterministic op is used.
+        torch.use_deterministic_algorithms(True)
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
@@ -483,6 +493,12 @@ if __name__ == "__main__":
         tv_return_penalty = None
         tv_return_std = None
         tv_return_fixed_cap = None
+        tv_return_clip_fraction = None
+        tv_return_clip_count = None
+        tv_return_excess_mean = None
+        tv_return_max_pre_clip = None
+        tv_return_p95_pre_clip = None
+        tv_return_p99_pre_clip = None
         tv_adv_lower = None
         tv_adv_upper = None
         tv_adv_penalty = None
@@ -491,6 +507,13 @@ if __name__ == "__main__":
         if args.tv_clip_value_targets:
             if args.tv_mode == "fixed_cap":
                 tv_return_fixed_cap = torch.tensor(float(args.tv_fixed_cap), device=b_returns.device, dtype=b_returns.dtype)
+                cap = float(args.tv_fixed_cap)
+                tv_return_clip_fraction = (b_returns > cap).float().mean()
+                tv_return_clip_count = (b_returns > cap).float().sum()
+                tv_return_excess_mean = torch.clamp(b_returns - cap, min=0.0).mean()
+                tv_return_max_pre_clip = b_returns.max()
+                tv_return_p95_pre_clip = torch.quantile(b_returns, 0.95)
+                tv_return_p99_pre_clip = torch.quantile(b_returns, 0.99)
                 b_returns = fixed_upper_cap(b_returns, float(args.tv_fixed_cap))
             elif args.tv_mode == "upper_quantile":
                 b_returns, tv_return_upper = upper_quantile_cap(b_returns, args.tv_keep_prob)
@@ -586,6 +609,13 @@ if __name__ == "__main__":
             writer.add_scalar("robust/tv_return_upper", tv_return_upper.item(), global_step)
         if tv_return_fixed_cap is not None:
             writer.add_scalar("robust/tv_return_fixed_cap", tv_return_fixed_cap.item(), global_step)
+        if tv_return_clip_fraction is not None:
+            writer.add_scalar("robust/tv_return_clip_fraction", tv_return_clip_fraction.item(), global_step)
+            writer.add_scalar("robust/tv_return_clip_count", tv_return_clip_count.item(), global_step)
+            writer.add_scalar("robust/tv_return_excess_mean", tv_return_excess_mean.item(), global_step)
+            writer.add_scalar("robust/tv_return_max_pre_clip", tv_return_max_pre_clip.item(), global_step)
+            writer.add_scalar("robust/tv_return_p95_pre_clip", tv_return_p95_pre_clip.item(), global_step)
+            writer.add_scalar("robust/tv_return_p99_pre_clip", tv_return_p99_pre_clip.item(), global_step)
         if tv_return_penalty is not None:
             writer.add_scalar("robust/tv_return_penalty", tv_return_penalty.item(), global_step)
             writer.add_scalar("robust/tv_return_std", tv_return_std.item(), global_step)
