@@ -127,6 +127,9 @@ def load_normalization_stats_if_available(envs, args: argparse.Namespace) -> boo
         if rew_norm is None:
             print("warning: NormalizeReward wrapper not found in eval env; cannot load reward stats.")
             return False
+        if not {"ret_mean", "ret_var", "ret_count"}.issubset(set(stats.files)):
+            print("warning: checkpoint normalization stats do not include reward normalization fields; rerun eval with --eval-raw-rewards.")
+            return False
         rew_norm.return_rms.mean = float(np.asarray(stats["ret_mean"], dtype=np.float64))
         rew_norm.return_rms.var = float(np.asarray(stats["ret_var"], dtype=np.float64))
         rew_norm.return_rms.count = float(np.asarray(stats["ret_count"], dtype=np.float64))
