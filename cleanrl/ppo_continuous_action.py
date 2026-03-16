@@ -88,6 +88,8 @@ class Args:
     """clip magnitude for observation noise (None for no clip)"""
     reward_noise_std: float = 0.0
     """Gaussian reward noise std (0 to disable)"""
+    normalize_reward: bool = True
+    """if false, skip NormalizeReward so value targets stay in raw-return space"""
     action_noise_std: float = 0.0
     """Gaussian action noise std (0 to disable)"""
     action_noise_clip: float | None = None
@@ -189,7 +191,8 @@ def make_env(env_id, idx, capture_video, run_name, gamma, args=None, seed=0):
         env = transform_observation_compat(env, lambda obs: np.clip(obs, -10, 10))
         # Evaluation can request raw reward reporting while still using normalized observations.
         eval_raw_rewards = bool(getattr(args, "eval_raw_rewards", False)) if args is not None else False
-        if not eval_raw_rewards:
+        normalize_reward = bool(getattr(args, "normalize_reward", True)) if args is not None else True
+        if not eval_raw_rewards and normalize_reward:
             env = gym.wrappers.NormalizeReward(env, gamma=gamma)
             env = transform_reward_compat(env, lambda reward: np.clip(reward, -10, 10))
         if args is not None:
@@ -331,17 +334,23 @@ def save_normalization_stats(envs, model_path: str) -> str:
     # Persist NormalizeObservation/NormalizeReward statistics for reliable checkpoint evaluation.
     env = envs.envs[0]
     obs_rms = env.get_wrapper_attr("obs_rms")
-    return_rms = env.get_wrapper_attr("return_rms")
+    try:
+        return_rms = env.get_wrapper_attr("return_rms")
+    except AttributeError:
+        return_rms = None
     norm_path = f"{model_path}.norm_stats.npz"
-    np.savez_compressed(
-        norm_path,
+    save_fields = dict(
         obs_mean=np.asarray(obs_rms.mean, dtype=np.float64),
         obs_var=np.asarray(obs_rms.var, dtype=np.float64),
         obs_count=np.asarray(obs_rms.count, dtype=np.float64),
-        ret_mean=np.asarray(return_rms.mean, dtype=np.float64),
-        ret_var=np.asarray(return_rms.var, dtype=np.float64),
-        ret_count=np.asarray(return_rms.count, dtype=np.float64),
     )
+    if return_rms is not None:
+        save_fields.update(
+            ret_mean=np.asarray(return_rms.mean, dtype=np.float64),
+            ret_var=np.asarray(return_rms.var, dtype=np.float64),
+            ret_count=np.asarray(return_rms.count, dtype=np.float64),
+        )
+    np.savez_compressed(norm_path, **save_fields)
     return norm_path
 
 
@@ -488,6 +497,9 @@ if __name__ == "__main__":
         b_advantages = advantages.reshape(-1)
         b_returns = returns.reshape(-1)
         b_values = values.reshape(-1)
+        returns_max_pre_transform = b_returns.max()
+        returns_p95_pre_transform = torch.quantile(b_returns, 0.95)
+        returns_p99_pre_transform = torch.quantile(b_returns, 0.99)
         tv_return_lower = None
         tv_return_upper = None
         tv_return_penalty = None
@@ -603,6 +615,9 @@ if __name__ == "__main__":
         writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
         writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
+        writer.add_scalar("targets/returns_max_pre_transform", returns_max_pre_transform.item(), global_step)
+        writer.add_scalar("targets/returns_p95_pre_transform", returns_p95_pre_transform.item(), global_step)
+        writer.add_scalar("targets/returns_p99_pre_transform", returns_p99_pre_transform.item(), global_step)
         if tv_return_lower is not None:
             writer.add_scalar("robust/tv_return_lower", tv_return_lower.item(), global_step)
         if tv_return_upper is not None:
