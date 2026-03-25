@@ -1,0 +1,26 @@
+[Wed Mar 25 10:30:18 AM EDT 2026] training alpha-grid job
+  env_id=Walker2d-v4
+  exp_name=ppo_alpha_vanilla
+  alpha=vanilla
+  seed=2
+  total_timesteps=1000000
+  normalize_reward=true
+  run_dir=/home/users/am1015/rl_runs_alpha_grid_norm
+  command= /home/users/am1015/cleanrl/.venv/bin/python -m cleanrl.ppo_continuous_action --exp-name ppo_alpha_vanilla --env-id Walker2d-v4 --seed 2 --total-timesteps 1000000 --run-dir /home/users/am1015/rl_runs_alpha_grid_norm --track --wandb-project-name fixed-alpha-randomness --wandb-group ppo-alpha-norm-calibration-5seed --save-model --torch-deterministic --enforce-full-determinism
+/home/users/am1015/cleanrl/.venv/lib/python3.11/site-packages/tyro/_parsers.py:353: UserWarning: The field `wandb-entity` is annotated with type `<class 'str'>`, but the default value `None` has type `<class 'NoneType'>`. We'll try to handle this gracefully, but it may cause unexpected behavior.
+  warnings.warn(message)
+/home/users/am1015/cleanrl/.venv/lib/python3.11/site-packages/tyro/_parsers.py:353: UserWarning: The field `target-kl` is annotated with type `<class 'float'>`, but the default value `None` has type `<class 'NoneType'>`. We'll try to handle this gracefully, but it may cause unexpected behavior.
+  warnings.warn(message)
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from /home/users/am1015/.netrc.
+wandb: Currently logged in as: arjun-mahesh (arjun-mahesh-duke-university) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: setting up run 462w3kbi
+wandb: Tracking run with wandb version 0.25.0
+wandb: Run data is saved locally in /home/users/am1015/cleanrl/wandb/run-20260325_103029-462w3kbi
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run Walker2d-v4__ppo_alpha_vanilla__2__1774449027
+wandb: ⭐️ View project at https://wandb.ai/arjun-mahesh-duke-university/fixed-alpha-randomness
+wandb: 🚀 View run at https://wandb.ai/arjun-mahesh-duke-university/fixed-alpha-randomness/runs/462w3kbi
+wandb: WARNING Found log directory outside of given root_logdir, dropping given root_logdir for event file in /home/users/am1015/rl_runs_alpha_grid_norm/Walker2d-v4__ppo_alpha_vanilla__2__1774449027
+/home/users/am1015/cleanrl/.venv/lib/python3.11/site-packages/gymnasium/envs/registration.py:512: DeprecationWarning: [33mWARN: The environment Walker2d-v4 is out of date. You should consider upgrading to version `v5`.[0m
+  logger.deprecation(
+[2026-03-25T10:34:47.737] error: *** JOB 10805732 ON linux50 CANCELLED AT 2026-03-25T10:34:47 DUE to SIGNAL Terminated ***
