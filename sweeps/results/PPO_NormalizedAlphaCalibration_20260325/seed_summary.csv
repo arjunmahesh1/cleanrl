@@ -1,0 +1,6 @@
+entry_id,run_name,seed,p95_pre_transform,p99_pre_transform,max_pre_transform,episodic_return,notes
+entry_1,, ,2.8341281,2.8629873,2.904499,4386.82,"manual copy from W&B summary; map to seed before finalizing"
+entry_2,, ,2.944858,2.975373,2.9980123,3999.0894,"manual copy from W&B summary; map to seed before finalizing"
+entry_3,, ,3.3548896,3.4136767,3.4670875,2685.928,"manual copy from W&B summary; map to seed before finalizing"
+entry_4,, ,2.8295147,2.866303,2.9051356,856.3664,"manual copy from W&B summary; map to seed before finalizing"
+entry_5,, ,2.927475,2.962289,2.997653,4199.578,"manual copy from W&B summary; map to seed before finalizing"
