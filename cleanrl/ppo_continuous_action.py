@@ -665,6 +665,10 @@ if __name__ == "__main__":
             device=device,
             capture_video=args.capture_video,
             gamma=args.gamma,
+            norm_stats_path=norm_stats_path,
+            eval_raw_rewards=True,
+            normalize_reward=args.normalize_reward,
+            seed=args.seed,
         )
         for idx, episodic_return in enumerate(episodic_returns):
             writer.add_scalar("eval/episodic_return", episodic_return, idx)
