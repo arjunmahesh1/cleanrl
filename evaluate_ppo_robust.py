@@ -1,6 +1,7 @@
 import argparse
 import csv
 import os
+import re
 import time
 from types import SimpleNamespace
 
@@ -179,9 +180,26 @@ def build_perturbation_args(args: argparse.Namespace) -> SimpleNamespace:
     )
 
 
+def _sanitize_run_name(text: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", text).strip("_") or "eval"
+
+
+def _default_eval_run_name(args: argparse.Namespace) -> str:
+    parts = [
+        "eval",
+        args.env_id,
+        args.algo,
+        args.model_label or os.path.splitext(os.path.basename(args.model_path))[0],
+        args.scenario_label or "nominal",
+        f"seed{args.seed}",
+        f"pid{os.getpid()}",
+    ]
+    return _sanitize_run_name("__".join(parts))
+
+
 def evaluate_discrete(args: argparse.Namespace):
     perturb = build_perturbation_args(args)
-    run_name = args.run_name or f"eval_{args.env_id}"
+    run_name = args.run_name or _default_eval_run_name(args)
     envs = gym.vector.SyncVectorEnv([make_ppo_env(args.env_id, 0, args.capture_video, run_name, perturb, args.seed)])
     device = torch.device(args.device)
     agent = PPOAgent(envs).to(device)
@@ -202,7 +220,7 @@ def evaluate_discrete(args: argparse.Namespace):
 
 def evaluate_continuous(args: argparse.Namespace):
     perturb = build_perturbation_args(args)
-    run_name = args.run_name or f"eval_{args.env_id}"
+    run_name = args.run_name or _default_eval_run_name(args)
     envs = gym.vector.SyncVectorEnv(
         [make_ppo_continuous_env(args.env_id, 0, args.capture_video, run_name, args.gamma, perturb, args.seed)]
     )
@@ -265,7 +283,7 @@ def main():
     parser.add_argument("--xml-actuator-bias-scale", type=float, default=1.0)
 
     args = parser.parse_args()
-    eval_name = args.run_name or f"eval__{args.env_id}__{args.algo}__{int(time.time())}"
+    eval_name = args.run_name or _default_eval_run_name(args)
     is_perturbed = is_perturbed_eval(args)
 
     wandb_run = None
