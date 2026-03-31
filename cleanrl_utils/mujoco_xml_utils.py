@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import tempfile
 import xml.etree.ElementTree as ET
 from typing import Optional
 
@@ -113,7 +114,18 @@ def perturb_mujoco_xml(
 
     out_name = f"{pathlib.Path(base_xml_path).stem}__{run_name}.xml"
     out_path = os.path.join(out_dir, out_name)
-    tree.write(out_path)
+    fd, tmp_path = tempfile.mkstemp(
+        prefix=f".{pathlib.Path(out_name).stem}__",
+        suffix=".tmp",
+        dir=out_dir,
+    )
+    os.close(fd)
+    try:
+        tree.write(tmp_path)
+        os.replace(tmp_path, out_path)
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
     return out_path
 
 

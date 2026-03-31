@@ -1,0 +1,3 @@
+axis,model_label,nominal_mean_return,nominal_mean_return_ci95,avg_gain_mean_return,avg_gain_mean_return_ci95,positive_gain_scenarios,perturbed_scenarios
+friction,vanilla,3162.2318138581386,638.5505897295176,0.0,0.0,0,0
+nominal,vanilla,3182.9754723073893,650.9238552202686,0.0,0.0,0,0
