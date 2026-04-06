@@ -434,6 +434,10 @@ def build_model_styles(model_labels: list[str]) -> dict[str, dict[str, str]]:
         "#e377c2",  # pink
         "#bcbd22",  # olive
         "#17becf",  # cyan
+        "#393b79",  # indigo
+        "#637939",  # moss
+        "#8c6d31",  # mustard-brown
+        "#843c39",  # brick
     ]
     cap_markers = ["^", "D", "P", "X", "v", ">", "<", "h"]
 

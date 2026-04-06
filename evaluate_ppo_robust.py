@@ -363,6 +363,7 @@ def main():
             "norm_stats_path": args.norm_stats_path or f"{args.model_path}.norm_stats.npz",
             "eval_raw_rewards": int(args.eval_raw_rewards),
             "xml_perturb": int(args.xml_perturb),
+            "action_noise_std": args.action_noise_std,
             "xml_body_mass_scale": args.xml_body_mass_scale,
             "xml_geom_friction_scale": args.xml_geom_friction_scale,
             "xml_joint_damping_scale": args.xml_joint_damping_scale,
