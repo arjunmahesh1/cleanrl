@@ -1,18 +1,18 @@
-# PPO Alpha Grid - Expanded Robustness Evaluation
+# PPO_AlphaGridNorm_expanded_eval_20260404
 
-Date: 2026-04-06
+Date: 2026-04-08
 
 This folder packages the final pinned robustness evaluation for normalized PPO.
 
 ## Contents
 
-- Raw metrics: `/Users/arjunmahesh/Library/CloudStorage/OneDrive-Personal/Duke/Research/RL/cleanrl/sweeps/results/PPO_AlphaGridNorm_expanded_eval_20260404/raw_metrics`
-- Aggregated outputs: `/Users/arjunmahesh/Library/CloudStorage/OneDrive-Personal/Duke/Research/RL/cleanrl/sweeps/results/PPO_AlphaGridNorm_expanded_eval_20260404/outputs`
-- Plots: `/Users/arjunmahesh/Library/CloudStorage/OneDrive-Personal/Duke/Research/RL/cleanrl/sweeps/results/PPO_AlphaGridNorm_expanded_eval_20260404/plots`
+- Raw metrics: `/home/users/am1015/cleanrl/sweeps/results/PPO_AlphaGridNorm_expanded_eval_20260404/raw_metrics`
+- Aggregated outputs: `/home/users/am1015/cleanrl/sweeps/results/PPO_AlphaGridNorm_expanded_eval_20260404/outputs`
+- Plots: `/home/users/am1015/cleanrl/sweeps/results/PPO_AlphaGridNorm_expanded_eval_20260404/plots`
 
 ## Evaluation protocol
 
-- Models are compared on the same perturbation grid for `friction`, `mass`, and `damping`.
+- Models are compared on the same perturbation grid for the configured axes.
 - Nominal reference within each axis is the `factor=1.0` point.
 - Curves show mean return across seeds with `95% CI` shading.
 - Robust gain is defined as `vanilla_drop - model_drop`; positive is better.

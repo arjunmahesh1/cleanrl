@@ -74,6 +74,39 @@ class ActionNoiseWrapper(gym.ActionWrapper):
         return np.clip(noisy, self.action_space.low, self.action_space.high)
 
 
+class ActionReplaceWrapper(gym.ActionWrapper):
+    """With probability p, replace the action with a random action sample."""
+
+    def __init__(self, env: gym.Env, replace_prob: float = 0.0, seed: Optional[int] = None) -> None:
+        super().__init__(env)
+        self.replace_prob = float(replace_prob)
+        self.rng = np.random.default_rng(seed)
+        if not isinstance(self.action_space, gym.spaces.Box):
+            raise TypeError("ActionReplaceWrapper only supports Box action spaces.")
+        if self.replace_prob < 0.0 or self.replace_prob > 1.0:
+            raise ValueError("replace_prob must be in [0, 1].")
+        self._low = np.asarray(self.action_space.low, dtype=np.float64)
+        self._high = np.asarray(self.action_space.high, dtype=np.float64)
+        self._finite_mask = np.isfinite(self._low) & np.isfinite(self._high)
+        self._shape = self.action_space.shape
+
+    def action(self, action):  # type: ignore[override]
+        if self.replace_prob <= 0.0:
+            return action
+        if self.rng.random() < self.replace_prob:
+            sample = np.empty(self._shape, dtype=np.float64)
+            if np.any(self._finite_mask):
+                u = self.rng.random(self._shape)
+                sample[self._finite_mask] = (
+                    self._low[self._finite_mask]
+                    + u[self._finite_mask] * (self._high[self._finite_mask] - self._low[self._finite_mask])
+                )
+            if np.any(~self._finite_mask):
+                sample[~self._finite_mask] = self.rng.normal(0.0, 1.0, size=int(np.sum(~self._finite_mask)))
+            return sample.astype(self.action_space.dtype, copy=False)
+        return action
+
+
 class ParamOverrideWrapper(gym.Wrapper):
     """Deterministically override env attributes at each reset.
 
@@ -206,6 +239,7 @@ class ParamTransformWrapper(gym.Wrapper):
 
 __all__ = [
     "ActionNoiseWrapper",
+    "ActionReplaceWrapper",
     "ObservationNoiseWrapper",
     "ParamOverrideWrapper",
     "ParamRandomizationWrapper",

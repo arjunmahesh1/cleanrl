@@ -146,6 +146,7 @@ def is_perturbed_eval(args: argparse.Namespace) -> bool:
             args.obs_noise_std > 0.0,
             args.reward_noise_std > 0.0,
             args.action_noise_std > 0.0,
+            args.action_replace_prob > 0.0,
             bool(args.param_override),
             bool(args.param_randomize),
             args.xml_perturb,
@@ -165,6 +166,7 @@ def build_perturbation_args(args: argparse.Namespace) -> SimpleNamespace:
         reward_noise_std=args.reward_noise_std,
         action_noise_std=args.action_noise_std,
         action_noise_clip=args.action_noise_clip,
+        action_replace_prob=args.action_replace_prob,
         param_override=args.param_override,
         param_randomize=args.param_randomize,
         param_strict=args.param_strict,
@@ -269,6 +271,7 @@ def main():
     parser.add_argument("--reward-noise-std", type=float, default=0.0)
     parser.add_argument("--action-noise-std", type=float, default=0.0)
     parser.add_argument("--action-noise-clip", type=float, default=None)
+    parser.add_argument("--action-replace-prob", type=float, default=0.0)
     parser.add_argument("--param-override", default="")
     parser.add_argument("--param-randomize", default="")
     parser.add_argument("--param-strict", action=argparse.BooleanOptionalAction, default=True)
@@ -364,6 +367,7 @@ def main():
             "eval_raw_rewards": int(args.eval_raw_rewards),
             "xml_perturb": int(args.xml_perturb),
             "action_noise_std": args.action_noise_std,
+            "action_replace_prob": args.action_replace_prob,
             "xml_body_mass_scale": args.xml_body_mass_scale,
             "xml_geom_friction_scale": args.xml_geom_friction_scale,
             "xml_joint_damping_scale": args.xml_joint_damping_scale,

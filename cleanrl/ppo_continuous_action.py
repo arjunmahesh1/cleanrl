@@ -94,6 +94,8 @@ class Args:
     """Gaussian action noise std (0 to disable)"""
     action_noise_clip: float | None = None
     """clip magnitude for action noise (None for no clip)"""
+    action_replace_prob: float = 0.0
+    """Bernoulli probability to replace policy action with a random action"""
     param_override: str = ""
     """env param overrides: name[:mode]=value, comma-separated (mode: set|scale|add)"""
     param_randomize: str = ""
@@ -203,6 +205,7 @@ def make_env(env_id, idx, capture_video, run_name, gamma, args=None, seed=0):
                 reward_noise_std=args.reward_noise_std,
                 action_noise_std=args.action_noise_std,
                 action_noise_clip=args.action_noise_clip,
+                action_replace_prob=getattr(args, "action_replace_prob", 0.0),
                 param_override_spec=args.param_override,
                 param_randomize_spec=args.param_randomize,
                 param_strict=args.param_strict,

@@ -1,18 +1,18 @@
 # PPO Alpha Grid - Final Pinned Robustness Evaluation
 
-Date: 2026-03-30
+Date: 2026-04-08
 
 This folder packages the final pinned robustness evaluation for normalized PPO.
 
 ## Contents
 
-- Raw metrics: `/home/users/am1015/cleanrl/sweeps/results/PPO_AlphaGridNorm_final_eval_20260329/raw_metrics`
-- Aggregated outputs: `/home/users/am1015/cleanrl/sweeps/results/PPO_AlphaGridNorm_final_eval_20260329/outputs`
-- Plots: `/home/users/am1015/cleanrl/sweeps/results/PPO_AlphaGridNorm_final_eval_20260329/plots`
+- Raw metrics: `/Users/arjunmahesh/Library/CloudStorage/OneDrive-Personal/Duke/Research/RL/cleanrl/sweeps/results/PPO_AlphaGridNorm_final_eval_20260329/raw_metrics`
+- Aggregated outputs: `/Users/arjunmahesh/Library/CloudStorage/OneDrive-Personal/Duke/Research/RL/cleanrl/sweeps/results/PPO_AlphaGridNorm_final_eval_20260329/outputs`
+- Plots: `/Users/arjunmahesh/Library/CloudStorage/OneDrive-Personal/Duke/Research/RL/cleanrl/sweeps/results/PPO_AlphaGridNorm_final_eval_20260329/plots`
 
 ## Evaluation protocol
 
-- Models are compared on the same perturbation grid for `friction`, `mass`, and `damping`.
+- Models are compared on the same perturbation grid for the configured axes.
 - Nominal reference within each axis is the `factor=1.0` point.
 - Curves show mean return across seeds with `95% CI` shading.
 - Robust gain is defined as `vanilla_drop - model_drop`; positive is better.
@@ -46,6 +46,7 @@ This folder packages the final pinned robustness evaluation for normalized PPO.
 
 - `plots/return_curves_panel.png`
 - `plots/gain_curves_panel.png`
+- `plots/<axis>_variance_boxplot.png`: per-seed return spread across caps at selected factors.
 - `plots/damping_return_curve.png`
 - `plots/damping_gain_curve.png`
 - `plots/friction_return_curve.png`
