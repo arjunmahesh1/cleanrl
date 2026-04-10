@@ -57,6 +57,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--curve-points-name", default="curve_points.csv")
     parser.add_argument("--gain-curve-points-name", default="gain_curve_points.csv")
     parser.add_argument("--readme-name", default="README.md")
+    parser.add_argument("--nominal-factor", type=float, default=1.0)
+    parser.add_argument(
+        "--disable-variance-whiskers",
+        action="store_true",
+        help="Disable per-line variance whiskers on return/gain plots.",
+    )
     return parser.parse_args()
 
 
@@ -216,13 +222,13 @@ def format_factor_token(value: float) -> str:
     return text.replace(".", "p")
 
 
-def build_drop_summary(rows: list[EvalRow]) -> list[dict[str, object]]:
+def build_drop_summary(rows: list[EvalRow], nominal_factor: float = 1.0) -> list[dict[str, object]]:
     by_key = {(r.model_label, r.axis, r.factor, r.seed): r for r in rows}
     grouped: dict[tuple[str, str, float], list[dict[str, object]]] = defaultdict(list)
     for row in rows:
-        nominal = by_key.get((row.model_label, row.axis, 1.0, row.seed))
+        nominal = by_key.get((row.model_label, row.axis, nominal_factor, row.seed))
         if nominal is None:
-            nominal = by_key.get((row.model_label, "nominal", 1.0, row.seed))
+            nominal = by_key.get((row.model_label, "nominal", nominal_factor, row.seed))
         if nominal is None:
             continue
         drop_mean = nominal.mean_return - row.mean_return
@@ -272,6 +278,7 @@ def build_gain_summary(
     rows: list[EvalRow],
     baseline_model_label: str,
     comparison_model_labels: list[str],
+    nominal_factor: float = 1.0,
 ) -> list[dict[str, object]]:
     by_key = {(r.model_label, r.axis, r.factor, r.seed): r for r in rows}
     summary: list[dict[str, object]] = []
@@ -286,13 +293,13 @@ def build_gain_summary(
                 gain_median_vals: list[float] = []
                 gain_iqm_vals: list[float] = []
                 for seed in seeds:
-                    base_nom = by_key.get((baseline_model_label, axis, 1.0, seed))
+                    base_nom = by_key.get((baseline_model_label, axis, nominal_factor, seed))
                     if base_nom is None:
-                        base_nom = by_key.get((baseline_model_label, "nominal", 1.0, seed))
+                        base_nom = by_key.get((baseline_model_label, "nominal", nominal_factor, seed))
                     base_row = by_key.get((baseline_model_label, axis, factor, seed))
-                    cmp_nom = by_key.get((compare_label, axis, 1.0, seed))
+                    cmp_nom = by_key.get((compare_label, axis, nominal_factor, seed))
                     if cmp_nom is None:
-                        cmp_nom = by_key.get((compare_label, "nominal", 1.0, seed))
+                        cmp_nom = by_key.get((compare_label, "nominal", nominal_factor, seed))
                     cmp_row = by_key.get((compare_label, axis, factor, seed))
                     if None in (base_nom, base_row, cmp_nom, cmp_row):
                         continue
@@ -348,6 +355,7 @@ def build_axis_overview(
     gain_rows: list[dict[str, object]],
     baseline_model_label: str,
     comparison_model_labels: list[str],
+    nominal_factor: float = 1.0,
 ) -> list[dict[str, object]]:
     by_group = {
         (row["model_label"], row["axis"], row["factor"]): row
@@ -355,16 +363,16 @@ def build_axis_overview(
     }
     by_gain = defaultdict(list)
     for row in gain_rows:
-        if row["factor"] == 1.0:
+        if row["factor"] == nominal_factor:
             continue
         by_gain[(row["compare_model_label"], row["axis"])].append(row)
 
     axes = sorted({row["axis"] for row in summary_rows})
     overview: list[dict[str, object]] = []
     for axis in axes:
-        base_nom = by_group.get((baseline_model_label, axis, 1.0))
+        base_nom = by_group.get((baseline_model_label, axis, nominal_factor))
         if base_nom is None:
-            base_nom = by_group.get((baseline_model_label, "nominal", 1.0))
+            base_nom = by_group.get((baseline_model_label, "nominal", nominal_factor))
         if base_nom is None:
             continue
         overview.append(
@@ -419,23 +427,33 @@ def parse_alpha_like_label(label: str) -> float | None:
 
 
 def build_model_styles(model_labels: list[str]) -> dict[str, dict[str, str]]:
+    # Fixed, high-contrast styles for known variants to avoid any color collisions.
     styles: dict[str, dict[str, str]] = {
         "vanilla": {"color": "#1f77b4", "marker": "o", "linestyle": "-"},
         "a1e9": {"color": "#6e6e6e", "marker": "s", "linestyle": "--"},
         "noop": {"color": "#6e6e6e", "marker": "s", "linestyle": "--"},
+        "a2p85": {"color": "#2ca02c", "marker": "^", "linestyle": "-"},
+        "a2p95": {"color": "#ff7f0e", "marker": "D", "linestyle": "-"},
+        "a3p00": {"color": "#9467bd", "marker": "P", "linestyle": "-"},
+        "a3p05": {"color": "#17becf", "marker": "X", "linestyle": "-"},
+        "a3p10": {"color": "#d62728", "marker": "v", "linestyle": "-"},
+        "a3p20": {"color": "#8c564b", "marker": ">", "linestyle": "-"},
+        "a3p50": {"color": "#e377c2", "marker": "<", "linestyle": "-"},
+        "a3p70": {"color": "#bcbd22", "marker": "h", "linestyle": "-"},
+        "a4p00": {"color": "#393b79", "marker": "*", "linestyle": "-"},
     }
 
     cap_palette = [
-        "#2ca02c",  # green
-        "#d62728",  # red
-        "#9467bd",  # purple
-        "#ff7f0e",  # orange
-        "#8c564b",  # brown
-        "#e377c2",  # pink
-        "#bcbd22",  # olive
-        "#17becf",  # cyan
+        "#637939",  # moss
+        "#8c6d31",  # mustard-brown
+        "#843c39",  # brick
+        "#7f7f7f",  # medium gray
+        "#3182bd",  # alt blue
+        "#31a354",  # alt green
+        "#756bb1",  # alt purple
+        "#636363",  # dark gray
     ]
-    cap_markers = ["^", "D", "P", "X", "v", ">", "<", "h"]
+    cap_markers = ["^", "D", "P", "X", "v", ">", "<", "h", "*"]
 
     cap_labels = [label for label in model_labels if label not in styles]
     cap_labels = sorted(
@@ -456,11 +474,118 @@ def build_model_styles(model_labels: list[str]) -> dict[str, dict[str, str]]:
     return styles
 
 
+def draw_vertical_range_whisker(
+    ax,
+    x: float,
+    y_low: float,
+    y_high: float,
+    color: str,
+) -> None:
+    if not np.isfinite(x) or not np.isfinite(y_low) or not np.isfinite(y_high):
+        return
+    if y_high < y_low:
+        y_low, y_high = y_high, y_low
+    if y_high <= y_low:
+        return
+    x_min, x_max = ax.get_xlim()
+    cap_half = max(0.003 * (x_max - x_min), 0.005)
+    ax.vlines(x, y_low, y_high, color=color, linewidth=2.2, alpha=0.95, zorder=6)
+    ax.hlines([y_low, y_high], x - cap_half, x + cap_half, color=color, linewidth=2.0, alpha=0.95, zorder=6)
+
+
+def add_max_return_spread_whisker(
+    ax,
+    rows: list[EvalRow],
+    axis: str,
+    model_label: str,
+    color: str,
+) -> None:
+    factor_to_vals: dict[float, list[float]] = defaultdict(list)
+    for r in rows:
+        if r.axis == axis and r.model_label == model_label:
+            factor_to_vals[r.factor].append(r.mean_return)
+    if not factor_to_vals:
+        return
+    best_factor = None
+    best_spread = -1.0
+    best_low = 0.0
+    best_high = 0.0
+    for factor, vals in factor_to_vals.items():
+        arr = np.asarray(vals, dtype=np.float64)
+        if arr.size == 0:
+            continue
+        low = float(np.min(arr))
+        high = float(np.max(arr))
+        spread = high - low
+        if spread > best_spread:
+            best_spread = spread
+            best_factor = float(factor)
+            best_low = low
+            best_high = high
+    if best_factor is None:
+        return
+    draw_vertical_range_whisker(ax, best_factor, best_low, best_high, color)
+
+
+def add_max_gain_spread_whisker(
+    ax,
+    by_key: dict[tuple[str, str, float, int], EvalRow],
+    seeds: list[int],
+    baseline_model_label: str,
+    compare_label: str,
+    axis: str,
+    nominal_factor: float,
+    color: str,
+) -> None:
+    candidate_factors = sorted(
+        {
+            factor
+            for (model_label, row_axis, factor, _seed) in by_key.keys()
+            if model_label == compare_label and row_axis == axis
+        }
+    )
+    if not candidate_factors:
+        return
+    best_factor = None
+    best_spread = -1.0
+    best_low = 0.0
+    best_high = 0.0
+    for factor in candidate_factors:
+        gains: list[float] = []
+        for seed in seeds:
+            base_nom = by_key.get((baseline_model_label, axis, nominal_factor, seed))
+            base_row = by_key.get((baseline_model_label, axis, factor, seed))
+            cmp_nom = by_key.get((compare_label, axis, nominal_factor, seed))
+            cmp_row = by_key.get((compare_label, axis, factor, seed))
+            if None in (base_nom, base_row, cmp_nom, cmp_row):
+                continue
+            base_drop = base_nom.mean_return - base_row.mean_return
+            cmp_drop = cmp_nom.mean_return - cmp_row.mean_return
+            gains.append(base_drop - cmp_drop)
+        if not gains:
+            continue
+        arr = np.asarray(gains, dtype=np.float64)
+        low = float(np.min(arr))
+        high = float(np.max(arr))
+        spread = high - low
+        if spread > best_spread:
+            best_spread = spread
+            best_factor = float(factor)
+            best_low = low
+            best_high = high
+    if best_factor is None:
+        return
+    draw_vertical_range_whisker(ax, best_factor, best_low, best_high, color)
+
+
 def plot_return_curves(
+    rows: list[EvalRow],
     summary_rows: list[dict[str, object]],
     model_order: list[str],
     display_map: dict[str, str],
     out_dir: Path,
+    nominal_factor: float = 1.0,
+    show_variance_whiskers: bool = True,
 ) -> None:
     import matplotlib
     matplotlib.use("Agg")
@@ -498,7 +623,9 @@ def plot_return_curves(
                 label=label,
             )
             ax.fill_between(xs, ys - cis, ys + cis, color=color, alpha=0.18)
-        ax.axvline(1.0, color="#d62728", linestyle="--", linewidth=1.8, alpha=0.9)
+            if show_variance_whiskers:
+                add_max_return_spread_whisker(ax, rows, axis, model_label, color)
+        ax.axvline(nominal_factor, color="#d62728", linestyle="--", linewidth=1.8, alpha=0.9)
         ax.set_title(axis.capitalize())
         ax.set_xlabel(f"{axis.capitalize()} scale")
         ax.grid(alpha=0.25)
@@ -536,7 +663,9 @@ def plot_return_curves(
                 label=label,
             )
             ax.fill_between(xs, ys - cis, ys + cis, color=color, alpha=0.18)
-        ax.axvline(1.0, color="#d62728", linestyle="--", linewidth=1.8, alpha=0.9, label="Nominal scale")
+            if show_variance_whiskers:
+                add_max_return_spread_whisker(ax, rows, axis, model_label, color)
+        ax.axvline(nominal_factor, color="#d62728", linestyle="--", linewidth=1.8, alpha=0.9, label="Nominal scale")
         ax.set_xlabel(f"{axis.capitalize()} scale")
         ax.set_ylabel("Average reward")
         ax.set_title(f"{axis.capitalize()} robustness")
@@ -548,10 +677,14 @@ def plot_return_curves(
 
 
 def plot_gain_curves(
+    rows: list[EvalRow],
     gain_rows: list[dict[str, object]],
+    baseline_model_label: str,
     comparison_model_labels: list[str],
     display_map: dict[str, str],
     out_dir: Path,
+    nominal_factor: float = 1.0,
+    show_variance_whiskers: bool = True,
 ) -> None:
     import matplotlib
     matplotlib.use("Agg")
@@ -565,6 +698,9 @@ def plot_gain_curves(
     fig, axs = plt.subplots(1, len(axes), figsize=(6 * len(axes), 4.8), sharey=True)
     if len(axes) == 1:
         axs = [axs]
+
+    by_key = {(r.model_label, r.axis, r.factor, r.seed): r for r in rows}
+    seeds = sorted({r.seed for r in rows})
 
     for ax, axis in zip(axs, axes):
         axis_rows = [row for row in gain_rows if row["axis"] == axis]
@@ -591,8 +727,19 @@ def plot_gain_curves(
                 label=label,
             )
             ax.fill_between(xs, ys - cis, ys + cis, color=color, alpha=0.18)
+            if show_variance_whiskers:
+                add_max_gain_spread_whisker(
+                    ax,
+                    by_key,
+                    seeds,
+                    baseline_model_label,
+                    compare_label,
+                    axis,
+                    nominal_factor,
+                    color,
+                )
         ax.axhline(0.0, color="#111111", linestyle="--", linewidth=1.4, alpha=0.8)
-        ax.axvline(1.0, color="#d62728", linestyle="--", linewidth=1.8, alpha=0.9)
+        ax.axvline(nominal_factor, color="#d62728", linestyle="--", linewidth=1.8, alpha=0.9)
         ax.set_title(axis.capitalize())
         ax.set_xlabel(f"{axis.capitalize()} scale")
         ax.grid(alpha=0.25)
@@ -630,8 +777,19 @@ def plot_gain_curves(
                 label=label,
             )
             ax.fill_between(xs, ys - cis, ys + cis, color=color, alpha=0.18)
+            if show_variance_whiskers:
+                add_max_gain_spread_whisker(
+                    ax,
+                    by_key,
+                    seeds,
+                    baseline_model_label,
+                    compare_label,
+                    axis,
+                    nominal_factor,
+                    color,
+                )
         ax.axhline(0.0, color="#111111", linestyle="--", linewidth=1.4, alpha=0.8, label="Zero gain")
-        ax.axvline(1.0, color="#d62728", linestyle="--", linewidth=1.8, alpha=0.9, label="Nominal scale")
+        ax.axvline(nominal_factor, color="#d62728", linestyle="--", linewidth=1.8, alpha=0.9, label="Nominal scale")
         ax.set_xlabel(f"{axis.capitalize()} scale")
         ax.set_ylabel("Robust gain (higher is better)")
         ax.set_title(f"{axis.capitalize()} robust gain")
@@ -663,6 +821,7 @@ def build_readme(
     model_order: list[str],
     comparison_model_labels: list[str],
     display_map: dict[str, str],
+    nominal_factor: float = 1.0,
 ) -> str:
     by_group = {(row["model_label"], row["axis"], row["factor"]): row for row in summary_rows}
     axes = sorted({row["axis"] for row in summary_rows})
@@ -681,8 +840,8 @@ def build_readme(
         "",
         "## Evaluation protocol",
         "",
-        "- Models are compared on the same perturbation grid for `friction`, `mass`, and `damping`.",
-        "- Nominal reference within each axis is the `factor=1.0` point.",
+        "- Models are compared on the same perturbation grid for the configured axes.",
+        f"- Nominal reference within each axis is the `factor={nominal_factor}` point.",
         "- Curves show mean return across seeds with `95% CI` shading.",
         "- Robust gain is defined as `vanilla_drop - model_drop`; positive is better.",
         "",
@@ -702,9 +861,9 @@ def build_readme(
     for axis in axes:
         row = [axis]
         for model_label in model_order:
-            grow = by_group.get((model_label, axis, 1.0))
+            grow = by_group.get((model_label, axis, nominal_factor))
             if grow is None:
-                grow = by_group.get((model_label, "nominal", 1.0))
+                grow = by_group.get((model_label, "nominal", nominal_factor))
             if grow is None:
                 row.append("n/a")
                 continue
@@ -797,10 +956,19 @@ def main() -> None:
 
     write_eval_metrics(rows, eval_metrics_path)
     summary_rows = build_group_summary(rows)
-    drop_rows = build_drop_summary(rows)
-    gain_rows = build_gain_summary(rows, args.baseline_model_label, comparison_model_labels)
+    drop_rows = build_drop_summary(rows, nominal_factor=args.nominal_factor)
+    gain_rows = build_gain_summary(
+        rows,
+        args.baseline_model_label,
+        comparison_model_labels,
+        nominal_factor=args.nominal_factor,
+    )
     overview_rows = build_axis_overview(
-        summary_rows, gain_rows, args.baseline_model_label, comparison_model_labels
+        summary_rows,
+        gain_rows,
+        args.baseline_model_label,
+        comparison_model_labels,
+        nominal_factor=args.nominal_factor,
     )
 
     write_csv(
@@ -909,8 +1077,25 @@ def main() -> None:
         ],
     )
 
-    plot_return_curves(summary_rows, model_order, display_map, plots_dir)
-    plot_gain_curves(gain_rows, comparison_model_labels, display_map, plots_dir)
+    plot_return_curves(
+        rows,
+        summary_rows,
+        model_order,
+        display_map,
+        plots_dir,
+        nominal_factor=args.nominal_factor,
+        show_variance_whiskers=not args.disable_variance_whiskers,
+    )
+    plot_gain_curves(
+        rows,
+        gain_rows,
+        args.baseline_model_label,
+        comparison_model_labels,
+        display_map,
+        plots_dir,
+        nominal_factor=args.nominal_factor,
+        show_variance_whiskers=not args.disable_variance_whiskers,
+    )
 
     readme = build_readme(
         title=args.title,
@@ -923,6 +1108,7 @@ def main() -> None:
         model_order=model_order,
         comparison_model_labels=comparison_model_labels,
         display_map=display_map,
+        nominal_factor=args.nominal_factor,
     )
     (out_dir / args.readme_name).write_text(readme, encoding="utf-8")
 

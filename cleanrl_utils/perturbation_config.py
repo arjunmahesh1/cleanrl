@@ -6,6 +6,7 @@ import gymnasium as gym
 
 from cleanrl_utils.perturbation_wrappers import (
     ActionNoiseWrapper,
+    ActionReplaceWrapper,
     ObservationNoiseWrapper,
     ParamOverrideWrapper,
     ParamRandomizationWrapper,
@@ -62,6 +63,7 @@ def apply_env_perturbations(
     reward_noise_std: float,
     action_noise_std: float,
     action_noise_clip: float | None,
+    action_replace_prob: float,
     param_override_spec: str,
     param_randomize_spec: str,
     param_strict: bool,
@@ -77,6 +79,8 @@ def apply_env_perturbations(
         env = RewardNoiseWrapper(env, noise_std=reward_noise_std, seed=seed)
     if action_noise_std > 0:
         env = ActionNoiseWrapper(env, noise_std=action_noise_std, noise_clip=action_noise_clip, seed=seed)
+    if action_replace_prob > 0:
+        env = ActionReplaceWrapper(env, replace_prob=action_replace_prob, seed=seed)
     return env
 
 
