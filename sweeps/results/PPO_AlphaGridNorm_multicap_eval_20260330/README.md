@@ -1,14 +1,14 @@
-# PPO Alpha Grid - Multi-cap Robustness Evaluation
+# PPO_AlphaGridNorm_multicap_eval_20260330
 
-Date: 2026-04-08
+Date: 2026-04-15
 
 This folder packages the final pinned robustness evaluation for normalized PPO.
 
 ## Contents
 
-- Raw metrics: `/Users/arjunmahesh/Library/CloudStorage/OneDrive-Personal/Duke/Research/RL/cleanrl/sweeps/results/PPO_AlphaGridNorm_multicap_eval_20260330/raw_metrics`
-- Aggregated outputs: `/Users/arjunmahesh/Library/CloudStorage/OneDrive-Personal/Duke/Research/RL/cleanrl/sweeps/results/PPO_AlphaGridNorm_multicap_eval_20260330/outputs`
-- Plots: `/Users/arjunmahesh/Library/CloudStorage/OneDrive-Personal/Duke/Research/RL/cleanrl/sweeps/results/PPO_AlphaGridNorm_multicap_eval_20260330/plots`
+- Raw metrics: `/home/users/am1015/cleanrl/sweeps/results/PPO_AlphaGridNorm_multicap_eval_20260330/raw_metrics`
+- Aggregated outputs: `/home/users/am1015/cleanrl/sweeps/results/PPO_AlphaGridNorm_multicap_eval_20260330/outputs`
+- Plots: `/home/users/am1015/cleanrl/sweeps/results/PPO_AlphaGridNorm_multicap_eval_20260330/plots`
 
 ## Evaluation protocol
 
@@ -31,7 +31,7 @@ This folder packages the final pinned robustness evaluation for normalized PPO.
 | --- | --- | --- | --- | --- | --- |
 | damping | 2861.93 +/- 703.87 | 2814.89 +/- 540.19 | 3094.57 +/- 953.27 | 2400.00 +/- 571.46 | 2326.56 +/- 904.14 |
 | friction | 2984.94 +/- 810.65 | 3042.52 +/- 729.30 | 2674.42 +/- 749.14 | 2773.93 +/- 698.21 | 2368.42 +/- 909.18 |
-| mass | 2900.30 +/- 469.84 | 2932.82 +/- 676.08 | 2586.72 +/- 677.98 | 2844.77 +/- 538.81 | 2536.50 +/- 1098.36 |
+| mass | 3100.72 +/- 598.60 | 2735.97 +/- 535.16 | 3000.28 +/- 1003.21 | 2601.57 +/- 536.30 | 2547.05 +/- 908.42 |
 
 ## Axis overview
 
@@ -45,16 +45,15 @@ This folder packages the final pinned robustness evaluation for normalized PPO.
 | friction | TV cap=2.95 | 2674.42 +/- 749.14 | +728.87 | 10/10 |
 | friction | TV cap=3.05 | 2773.93 +/- 698.21 | +243.26 | 10/10 |
 | friction | TV cap=3.50 | 2368.42 +/- 909.18 | +369.35 | 8/10 |
-| mass | No-op (1e9) | 2932.82 +/- 676.08 | +9.81 | 6/10 |
-| mass | TV cap=2.95 | 2586.72 +/- 677.98 | +406.44 | 10/10 |
-| mass | TV cap=3.05 | 2844.77 +/- 538.81 | -118.25 | 1/10 |
-| mass | TV cap=3.50 | 2536.50 +/- 1098.36 | +16.46 | 6/10 |
+| mass | No-op (1e9) | 2735.97 +/- 535.16 | +314.08 | 10/10 |
+| mass | TV cap=2.95 | 3000.28 +/- 1003.21 | +260.83 | 10/10 |
+| mass | TV cap=3.05 | 2601.57 +/- 536.30 | +688.07 | 10/10 |
+| mass | TV cap=3.50 | 2547.05 +/- 908.42 | +323.70 | 7/10 |
 
 ## Plot files
 
 - `plots/return_curves_panel.png`
 - `plots/gain_curves_panel.png`
-- `plots/<axis>_variance_boxplot.png`: per-seed return spread across caps at selected factors.
 - `plots/damping_return_curve.png`
 - `plots/damping_gain_curve.png`
 - `plots/friction_return_curve.png`

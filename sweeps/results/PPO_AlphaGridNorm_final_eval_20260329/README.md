@@ -1,14 +1,14 @@
-# PPO Alpha Grid - Final Pinned Robustness Evaluation
+# PPO_AlphaGridNorm_final_eval_20260329
 
-Date: 2026-04-08
+Date: 2026-04-15
 
 This folder packages the final pinned robustness evaluation for normalized PPO.
 
 ## Contents
 
-- Raw metrics: `/Users/arjunmahesh/Library/CloudStorage/OneDrive-Personal/Duke/Research/RL/cleanrl/sweeps/results/PPO_AlphaGridNorm_final_eval_20260329/raw_metrics`
-- Aggregated outputs: `/Users/arjunmahesh/Library/CloudStorage/OneDrive-Personal/Duke/Research/RL/cleanrl/sweeps/results/PPO_AlphaGridNorm_final_eval_20260329/outputs`
-- Plots: `/Users/arjunmahesh/Library/CloudStorage/OneDrive-Personal/Duke/Research/RL/cleanrl/sweeps/results/PPO_AlphaGridNorm_final_eval_20260329/plots`
+- Raw metrics: `/home/users/am1015/cleanrl/sweeps/results/PPO_AlphaGridNorm_final_eval_20260329/raw_metrics`
+- Aggregated outputs: `/home/users/am1015/cleanrl/sweeps/results/PPO_AlphaGridNorm_final_eval_20260329/outputs`
+- Plots: `/home/users/am1015/cleanrl/sweeps/results/PPO_AlphaGridNorm_final_eval_20260329/plots`
 
 ## Evaluation protocol
 
@@ -29,7 +29,7 @@ This folder packages the final pinned robustness evaluation for normalized PPO.
 | --- | --- | --- | --- |
 | damping | 2830.42 +/- 392.26 | 2740.62 +/- 356.00 | 2671.87 +/- 710.80 |
 | friction | 2801.26 +/- 463.56 | 2858.93 +/- 424.57 | 2692.18 +/- 705.66 |
-| mass | 2932.26 +/- 680.85 | 2894.05 +/- 540.81 | 2568.53 +/- 546.45 |
+| mass | 2649.54 +/- 617.18 | 3083.29 +/- 500.53 | 2850.81 +/- 654.44 |
 
 ## Axis overview
 
@@ -39,14 +39,13 @@ This folder packages the final pinned robustness evaluation for normalized PPO.
 | damping | TV cap=3.05 | 2671.87 +/- 710.80 | +13.44 | 5/10 |
 | friction | No-op (1e9) | 2858.93 +/- 424.57 | -42.87 | 2/10 |
 | friction | TV cap=3.05 | 2692.18 +/- 705.66 | +89.99 | 6/10 |
-| mass | No-op (1e9) | 2894.05 +/- 540.81 | +51.08 | 6/10 |
-| mass | TV cap=3.05 | 2568.53 +/- 546.45 | +286.18 | 9/10 |
+| mass | No-op (1e9) | 3083.29 +/- 500.53 | -388.33 | 0/10 |
+| mass | TV cap=3.05 | 2850.81 +/- 654.44 | -1.08 | 4/10 |
 
 ## Plot files
 
 - `plots/return_curves_panel.png`
 - `plots/gain_curves_panel.png`
-- `plots/<axis>_variance_boxplot.png`: per-seed return spread across caps at selected factors.
 - `plots/damping_return_curve.png`
 - `plots/damping_gain_curve.png`
 - `plots/friction_return_curve.png`

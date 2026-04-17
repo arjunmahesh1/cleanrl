@@ -109,15 +109,23 @@ class Args:
     xml_path_override: str | None = None
     """optional base XML path to perturb (defaults to env's XML)"""
     xml_body_mass_scale: float = 1.0
-    """scale body mass attributes in XML"""
+    """scale effective body mass via geom density in XML"""
+    xml_body_name_selector: str = ""
+    """optional comma-separated body names to target for mass scaling"""
     xml_geom_friction_scale: float = 1.0
     """scale geom friction attributes in XML"""
+    xml_geom_name_selector: str = ""
+    """optional comma-separated geom names to target for friction scaling"""
     xml_joint_damping_scale: float = 1.0
     """scale joint damping attributes in XML"""
+    xml_joint_name_selector: str = ""
+    """optional comma-separated joint names to target for damping scaling"""
     xml_actuator_gain_scale: float = 1.0
-    """scale actuator gain parameters in XML"""
+    """scale actuator strength (motor gear, or gainprm when present) in XML"""
     xml_actuator_bias_scale: float = 1.0
     """scale actuator bias parameters in XML"""
+    xml_actuator_joint_selector: str = ""
+    """optional comma-separated actuator joint names to target for gain/bias scaling"""
     tv_clip_value_targets: bool = False
     """if true, apply robust clipping/penalty to value targets"""
     tv_clip_advantages: bool = False
@@ -161,10 +169,14 @@ def make_env(env_id, idx, capture_video, run_name, gamma, args=None, seed=0):
                     xml_out_dir=args.xml_out_dir,
                     run_name=run_name,
                     body_mass_scale=args.xml_body_mass_scale,
+                    body_name_selector=args.xml_body_name_selector,
                     geom_friction_scale=args.xml_geom_friction_scale,
+                    geom_name_selector=args.xml_geom_name_selector,
                     joint_damping_scale=args.xml_joint_damping_scale,
+                    joint_name_selector=args.xml_joint_name_selector,
                     actuator_gain_scale=args.xml_actuator_gain_scale,
                     actuator_bias_scale=args.xml_actuator_bias_scale,
+                    actuator_joint_selector=args.xml_actuator_joint_selector,
                     xml_path_override=args.xml_path_override,
                     render_mode="rgb_array",
                 )
@@ -178,10 +190,14 @@ def make_env(env_id, idx, capture_video, run_name, gamma, args=None, seed=0):
                     xml_out_dir=args.xml_out_dir,
                     run_name=run_name,
                     body_mass_scale=args.xml_body_mass_scale,
+                    body_name_selector=args.xml_body_name_selector,
                     geom_friction_scale=args.xml_geom_friction_scale,
+                    geom_name_selector=args.xml_geom_name_selector,
                     joint_damping_scale=args.xml_joint_damping_scale,
+                    joint_name_selector=args.xml_joint_name_selector,
                     actuator_gain_scale=args.xml_actuator_gain_scale,
                     actuator_bias_scale=args.xml_actuator_bias_scale,
+                    actuator_joint_selector=args.xml_actuator_joint_selector,
                     xml_path_override=args.xml_path_override,
                 )
             else:

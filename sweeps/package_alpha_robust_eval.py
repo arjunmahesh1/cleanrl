@@ -59,6 +59,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--readme-name", default="README.md")
     parser.add_argument("--nominal-factor", type=float, default=1.0)
     parser.add_argument(
+        "--exclude-axes",
+        nargs="*",
+        default=[],
+        help="Optional axis names to exclude from summaries and plots.",
+    )
+    parser.add_argument(
         "--disable-variance-whiskers",
         action="store_true",
         help="Disable per-line variance whiskers on return/gain plots.",
@@ -125,35 +131,51 @@ def load_latest_rows(raw_metrics_dir: Path) -> list[EvalRow]:
     csv_paths = sorted(raw_metrics_dir.glob("*.csv"))
     if not csv_paths:
         raise RuntimeError(f"No CSV files found in {raw_metrics_dir}")
+    skipped_rows = 0
+    skipped_examples: list[str] = []
 
     for csv_path in csv_paths:
         with csv_path.open(newline="", encoding="utf-8") as fobj:
             reader = csv.DictReader(fobj)
-            for row in reader:
-                axis, factor = split_scenario_label(row["scenario_label"])
-                eval_row = EvalRow(
-                    timestamp=int(row["timestamp"]),
-                    model_label=row["model_label"],
-                    scenario_label=row["scenario_label"],
-                    axis=axis,
-                    factor=factor,
-                    seed=int(row["seed"]),
-                    mean_return=float(row["mean_return"]),
-                    std_return=float(row["std_return"]),
-                    median_return=float(row["median_return"]),
-                    iqm_return=float(row["iqm_return"]),
-                    min_return=float(row["min_return"]),
-                    max_return=float(row["max_return"]),
-                    eval_episodes=int(row["eval_episodes"]),
-                    model_path=row["model_path"],
-                    norm_stats_path=row["norm_stats_path"],
-                    eval_raw_rewards=int(row["eval_raw_rewards"]),
-                )
+            for line_no, row in enumerate(reader, start=2):
+                try:
+                    scenario_label = row["scenario_label"]
+                    axis, factor = split_scenario_label(scenario_label)
+                    eval_row = EvalRow(
+                        timestamp=int(row["timestamp"]),
+                        model_label=row["model_label"],
+                        scenario_label=scenario_label,
+                        axis=axis,
+                        factor=factor,
+                        seed=int(row["seed"]),
+                        mean_return=float(row["mean_return"]),
+                        std_return=float(row["std_return"]),
+                        median_return=float(row["median_return"]),
+                        iqm_return=float(row["iqm_return"]),
+                        min_return=float(row["min_return"]),
+                        max_return=float(row["max_return"]),
+                        eval_episodes=int(row["eval_episodes"]),
+                        model_path=row["model_path"],
+                        norm_stats_path=row["norm_stats_path"],
+                        eval_raw_rewards=int(row["eval_raw_rewards"]),
+                    )
+                except (KeyError, TypeError, ValueError) as exc:
+                    skipped_rows += 1
+                    if len(skipped_examples) < 5:
+                        skipped_examples.append(f"{csv_path.name}:{line_no} ({exc})")
+                    continue
                 key = (eval_row.model_label, eval_row.scenario_label, eval_row.seed)
                 prev = latest.get(key)
                 if prev is None or eval_row.timestamp > prev.timestamp:
                     latest[key] = eval_row
 
+    if skipped_rows:
+        print(
+            f"warning: skipped {skipped_rows} malformed raw_metrics rows from {raw_metrics_dir}"
+            f" (examples: {', '.join(skipped_examples)})"
+        )
+    if not latest:
+        raise RuntimeError(f"No valid rows found in {raw_metrics_dir}")
     return sorted(latest.values(), key=lambda r: (r.axis, r.factor, r.model_label, r.seed))
 
 
@@ -932,6 +954,11 @@ def main() -> None:
 
     display_map = parse_display_map(args.display_label)
     rows = load_latest_rows(raw_metrics_dir)
+    if args.exclude_axes:
+        excluded = set(args.exclude_axes)
+        rows = [row for row in rows if row.axis not in excluded]
+        if not rows:
+            raise RuntimeError(f"All rows were excluded by --exclude-axes={sorted(excluded)}")
     models = sorted({row.model_label for row in rows})
 
     comparison_model_labels = (
