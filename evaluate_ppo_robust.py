@@ -155,6 +155,10 @@ def is_perturbed_eval(args: argparse.Namespace) -> bool:
             args.xml_joint_damping_scale != 1.0,
             args.xml_actuator_gain_scale != 1.0,
             args.xml_actuator_bias_scale != 1.0,
+            bool(args.xml_body_name_selector),
+            bool(args.xml_geom_name_selector),
+            bool(args.xml_joint_name_selector),
+            bool(args.xml_actuator_joint_selector),
         ]
     )
 
@@ -174,10 +178,14 @@ def build_perturbation_args(args: argparse.Namespace) -> SimpleNamespace:
         xml_out_dir=args.xml_out_dir,
         xml_path_override=args.xml_path_override,
         xml_body_mass_scale=args.xml_body_mass_scale,
+        xml_body_name_selector=args.xml_body_name_selector,
         xml_geom_friction_scale=args.xml_geom_friction_scale,
+        xml_geom_name_selector=args.xml_geom_name_selector,
         xml_joint_damping_scale=args.xml_joint_damping_scale,
+        xml_joint_name_selector=args.xml_joint_name_selector,
         xml_actuator_gain_scale=args.xml_actuator_gain_scale,
         xml_actuator_bias_scale=args.xml_actuator_bias_scale,
+        xml_actuator_joint_selector=args.xml_actuator_joint_selector,
         eval_raw_rewards=args.eval_raw_rewards,
     )
 
@@ -280,10 +288,14 @@ def main():
     parser.add_argument("--xml-out-dir", default="perturbed_xml")
     parser.add_argument("--xml-path-override", default=None)
     parser.add_argument("--xml-body-mass-scale", type=float, default=1.0)
+    parser.add_argument("--xml-body-name-selector", default="")
     parser.add_argument("--xml-geom-friction-scale", type=float, default=1.0)
+    parser.add_argument("--xml-geom-name-selector", default="")
     parser.add_argument("--xml-joint-damping-scale", type=float, default=1.0)
+    parser.add_argument("--xml-joint-name-selector", default="")
     parser.add_argument("--xml-actuator-gain-scale", type=float, default=1.0)
     parser.add_argument("--xml-actuator-bias-scale", type=float, default=1.0)
+    parser.add_argument("--xml-actuator-joint-selector", default="")
 
     args = parser.parse_args()
     eval_name = args.run_name or _default_eval_run_name(args)
@@ -369,14 +381,20 @@ def main():
             "action_noise_std": args.action_noise_std,
             "action_replace_prob": args.action_replace_prob,
             "xml_body_mass_scale": args.xml_body_mass_scale,
+            "xml_body_name_selector": args.xml_body_name_selector,
             "xml_geom_friction_scale": args.xml_geom_friction_scale,
+            "xml_geom_name_selector": args.xml_geom_name_selector,
             "xml_joint_damping_scale": args.xml_joint_damping_scale,
+            "xml_joint_name_selector": args.xml_joint_name_selector,
+            "xml_actuator_gain_scale": args.xml_actuator_gain_scale,
+            "xml_actuator_bias_scale": args.xml_actuator_bias_scale,
             "mean_return": float(mean_return),
             "std_return": float(std_return),
             "median_return": float(median_return),
             "iqm_return": float(iqm_return),
             "min_return": float(min_return),
             "max_return": float(max_return),
+            "xml_actuator_joint_selector": args.xml_actuator_joint_selector,
         }
         header = list(row.keys())
         write_header = not os.path.exists(args.metrics_out_csv)

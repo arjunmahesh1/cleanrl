@@ -17,6 +17,52 @@ def _format_floats(values):
     return " ".join(f"{v:.8g}" for v in values)
 
 
+def _parse_name_selector(selector: str | None) -> set[str]:
+    if not selector:
+        return set()
+    return {part.strip() for part in selector.split(",") if part.strip()}
+
+
+def _matches_selector(name: str | None, selector: set[str]) -> bool:
+    if not selector:
+        return True
+    if not name:
+        return False
+    return name in selector
+
+
+def _float_attr(elem: ET.Element, key: str) -> float | None:
+    value = elem.attrib.get(key)
+    if value is None:
+        return None
+    return float(value)
+
+
+def _find_default_attr(root: ET.Element, child_tag: str, attr: str) -> float | None:
+    for default in root.iter("default"):
+        for child in list(default):
+            if child.tag == child_tag and attr in child.attrib:
+                return float(child.attrib[attr])
+    return None
+
+
+def _scale_default_attr(root: ET.Element, child_tag: str, attr: str, scale: float) -> None:
+    for default in root.iter("default"):
+        for child in list(default):
+            if child.tag == child_tag and attr in child.attrib:
+                child.attrib[attr] = str(float(child.attrib[attr]) * scale)
+
+
+def _is_floor_geom(elem: ET.Element) -> bool:
+    return elem.attrib.get("name") == "floor" or elem.attrib.get("type") == "plane"
+
+
+def _iter_direct_body_geoms(body: ET.Element):
+    for child in list(body):
+        if child.tag == "geom":
+            yield child
+
+
 def locate_mujoco_xml(env_id: str) -> str:
     env = gym.make(env_id)
     try:
@@ -75,6 +121,10 @@ def perturb_mujoco_xml(
     joint_damping_scale: float = 1.0,
     actuator_gain_scale: float = 1.0,
     actuator_bias_scale: float = 1.0,
+    body_name_selector: str | None = None,
+    geom_name_selector: str | None = None,
+    joint_name_selector: str | None = None,
+    actuator_joint_selector: str | None = None,
 ) -> str:
     base_xml_path = os.path.abspath(base_xml_path)
     out_dir = os.path.abspath(out_dir)
@@ -82,27 +132,82 @@ def perturb_mujoco_xml(
 
     tree = ET.parse(base_xml_path)
     root = tree.getroot()
+    body_names = _parse_name_selector(body_name_selector)
+    geom_names = _parse_name_selector(geom_name_selector)
+    joint_names = _parse_name_selector(joint_name_selector)
+    actuator_joints = _parse_name_selector(actuator_joint_selector)
 
     if body_mass_scale != 1.0:
-        for body in root.iter("body"):
-            if "mass" in body.attrib:
-                body.attrib["mass"] = str(float(body.attrib["mass"]) * body_mass_scale)
+        default_density = _find_default_attr(root, "geom", "density")
+        if body_names:
+            for body in root.iter("body"):
+                if not _matches_selector(body.attrib.get("name"), body_names):
+                    continue
+                for geom in _iter_direct_body_geoms(body):
+                    if _is_floor_geom(geom):
+                        continue
+                    base_density = _float_attr(geom, "density")
+                    if base_density is None:
+                        base_density = default_density
+                    if base_density is None:
+                        continue
+                    geom.attrib["density"] = str(base_density * body_mass_scale)
+        elif geom_names:
+            for geom in root.iter("geom"):
+                if _is_floor_geom(geom) or not _matches_selector(geom.attrib.get("name"), geom_names):
+                    continue
+                base_density = _float_attr(geom, "density")
+                if base_density is None:
+                    base_density = default_density
+                if base_density is None:
+                    continue
+                geom.attrib["density"] = str(base_density * body_mass_scale)
+        else:
+            _scale_default_attr(root, "geom", "density", body_mass_scale)
+            default_geom_ids = {id(c) for d in root.iter("default") for c in list(d) if c.tag == "geom"}
+            for geom in root.iter("geom"):
+                if _is_floor_geom(geom) or id(geom) in default_geom_ids:
+                    continue
+                if "density" in geom.attrib:
+                    geom.attrib["density"] = str(float(geom.attrib["density"]) * body_mass_scale)
 
     if geom_friction_scale != 1.0:
         for geom in root.iter("geom"):
-            if "friction" in geom.attrib:
+            if "friction" in geom.attrib and _matches_selector(geom.attrib.get("name"), geom_names):
                 fr = _float_list(geom.attrib["friction"])
                 fr = [v * geom_friction_scale for v in fr]
                 geom.attrib["friction"] = _format_floats(fr)
 
     if joint_damping_scale != 1.0:
-        for joint in root.iter("joint"):
-            if "damping" in joint.attrib:
-                joint.attrib["damping"] = str(float(joint.attrib["damping"]) * joint_damping_scale)
+        if joint_names:
+            default_damping = _find_default_attr(root, "joint", "damping")
+            for joint in root.iter("joint"):
+                if not _matches_selector(joint.attrib.get("name"), joint_names):
+                    continue
+                base_damping = _float_attr(joint, "damping")
+                if base_damping is None:
+                    base_damping = default_damping
+                if base_damping is None:
+                    continue
+                joint.attrib["damping"] = str(base_damping * joint_damping_scale)
+        else:
+            _scale_default_attr(root, "joint", "damping", joint_damping_scale)
+            default_joint_ids = {id(c) for d in root.iter("default") for c in list(d) if c.tag == "joint"}
+            for joint in root.iter("joint"):
+                if id(joint) in default_joint_ids:
+                    continue
+                if "damping" in joint.attrib:
+                    joint.attrib["damping"] = str(float(joint.attrib["damping"]) * joint_damping_scale)
 
     if actuator_gain_scale != 1.0 or actuator_bias_scale != 1.0:
         for act in root.iter("actuator"):
             for child in list(act):
+                if not _matches_selector(child.attrib.get("joint"), actuator_joints):
+                    continue
+                if actuator_gain_scale != 1.0 and "gear" in child.attrib:
+                    gear = _float_list(child.attrib["gear"])
+                    gear = [v * actuator_gain_scale for v in gear]
+                    child.attrib["gear"] = _format_floats(gear)
                 if actuator_gain_scale != 1.0 and "gainprm" in child.attrib:
                     gp = _float_list(child.attrib["gainprm"])
                     gp = [v * actuator_gain_scale for v in gp]
@@ -139,6 +244,10 @@ def make_mujoco_env(
     joint_damping_scale: float,
     actuator_gain_scale: float,
     actuator_bias_scale: float,
+    body_name_selector: str | None = None,
+    geom_name_selector: str | None = None,
+    joint_name_selector: str | None = None,
+    actuator_joint_selector: str | None = None,
     xml_path_override: Optional[str] = None,
     render_mode: Optional[str] = None,
 ):
@@ -152,6 +261,10 @@ def make_mujoco_env(
         joint_damping_scale=joint_damping_scale,
         actuator_gain_scale=actuator_gain_scale,
         actuator_bias_scale=actuator_bias_scale,
+        body_name_selector=body_name_selector,
+        geom_name_selector=geom_name_selector,
+        joint_name_selector=joint_name_selector,
+        actuator_joint_selector=actuator_joint_selector,
     )
 
     try:
