@@ -150,8 +150,10 @@ def is_perturbed_eval(args: argparse.Namespace) -> bool:
             bool(args.param_override),
             bool(args.param_randomize),
             args.xml_perturb,
+            args.xml_total_mass_scale != 1.0,
             args.xml_body_mass_scale != 1.0,
             args.xml_geom_friction_scale != 1.0,
+            args.xml_gravity_component_index >= 0 and args.xml_gravity_component_value is not None,
             args.xml_joint_damping_scale != 1.0,
             args.xml_actuator_gain_scale != 1.0,
             args.xml_actuator_bias_scale != 1.0,
@@ -177,10 +179,14 @@ def build_perturbation_args(args: argparse.Namespace) -> SimpleNamespace:
         xml_perturb=args.xml_perturb,
         xml_out_dir=args.xml_out_dir,
         xml_path_override=args.xml_path_override,
+        xml_total_mass_scale=args.xml_total_mass_scale,
         xml_body_mass_scale=args.xml_body_mass_scale,
         xml_body_name_selector=args.xml_body_name_selector,
         xml_geom_friction_scale=args.xml_geom_friction_scale,
+        xml_geom_friction_component=args.xml_geom_friction_component,
         xml_geom_name_selector=args.xml_geom_name_selector,
+        xml_gravity_component_index=args.xml_gravity_component_index,
+        xml_gravity_component_value=args.xml_gravity_component_value,
         xml_joint_damping_scale=args.xml_joint_damping_scale,
         xml_joint_name_selector=args.xml_joint_name_selector,
         xml_actuator_gain_scale=args.xml_actuator_gain_scale,
@@ -287,10 +293,14 @@ def main():
     parser.add_argument("--xml-perturb", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--xml-out-dir", default="perturbed_xml")
     parser.add_argument("--xml-path-override", default=None)
+    parser.add_argument("--xml-total-mass-scale", type=float, default=1.0)
     parser.add_argument("--xml-body-mass-scale", type=float, default=1.0)
     parser.add_argument("--xml-body-name-selector", default="")
     parser.add_argument("--xml-geom-friction-scale", type=float, default=1.0)
+    parser.add_argument("--xml-geom-friction-component", type=int, default=-1)
     parser.add_argument("--xml-geom-name-selector", default="")
+    parser.add_argument("--xml-gravity-component-index", type=int, default=-1)
+    parser.add_argument("--xml-gravity-component-value", type=float, default=None)
     parser.add_argument("--xml-joint-damping-scale", type=float, default=1.0)
     parser.add_argument("--xml-joint-name-selector", default="")
     parser.add_argument("--xml-actuator-gain-scale", type=float, default=1.0)
@@ -378,12 +388,18 @@ def main():
             "norm_stats_path": args.norm_stats_path or f"{args.model_path}.norm_stats.npz",
             "eval_raw_rewards": int(args.eval_raw_rewards),
             "xml_perturb": int(args.xml_perturb),
+            "obs_noise_std": args.obs_noise_std,
+            "reward_noise_std": args.reward_noise_std,
             "action_noise_std": args.action_noise_std,
             "action_replace_prob": args.action_replace_prob,
+            "xml_total_mass_scale": args.xml_total_mass_scale,
             "xml_body_mass_scale": args.xml_body_mass_scale,
             "xml_body_name_selector": args.xml_body_name_selector,
             "xml_geom_friction_scale": args.xml_geom_friction_scale,
+            "xml_geom_friction_component": args.xml_geom_friction_component,
             "xml_geom_name_selector": args.xml_geom_name_selector,
+            "xml_gravity_component_index": args.xml_gravity_component_index,
+            "xml_gravity_component_value": args.xml_gravity_component_value,
             "xml_joint_damping_scale": args.xml_joint_damping_scale,
             "xml_joint_name_selector": args.xml_joint_name_selector,
             "xml_actuator_gain_scale": args.xml_actuator_gain_scale,

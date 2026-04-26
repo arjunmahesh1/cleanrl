@@ -53,6 +53,13 @@ def _scale_default_attr(root: ET.Element, child_tag: str, attr: str, scale: floa
                 child.attrib[attr] = str(float(child.attrib[attr]) * scale)
 
 
+def _find_option_attr(root: ET.Element, attr: str) -> str | None:
+    option = root.find("option")
+    if option is None:
+        return None
+    return option.attrib.get(attr)
+
+
 def _is_floor_geom(elem: ET.Element) -> bool:
     return elem.attrib.get("name") == "floor" or elem.attrib.get("type") == "plane"
 
@@ -64,14 +71,18 @@ def _iter_direct_body_geoms(body: ET.Element):
 
 
 def locate_mujoco_xml(env_id: str) -> str:
-    env = gym.make(env_id)
     try:
-        if hasattr(env.unwrapped, "model_path"):
-            return str(env.unwrapped.model_path)
-        if hasattr(env.unwrapped, "model") and hasattr(env.unwrapped.model, "xml_path"):
-            return str(env.unwrapped.model.xml_path)
-    finally:
-        env.close()
+        env = gym.make(env_id)
+    except Exception:
+        env = None
+    if env is not None:
+        try:
+            if hasattr(env.unwrapped, "model_path"):
+                return str(env.unwrapped.model_path)
+            if hasattr(env.unwrapped, "model") and hasattr(env.unwrapped.model, "xml_path"):
+                return str(env.unwrapped.model.xml_path)
+        finally:
+            env.close()
 
     import gymnasium.envs.mujoco as mj
 
@@ -116,11 +127,15 @@ def perturb_mujoco_xml(
     out_dir: str,
     *,
     run_name: str,
+    total_mass_scale: float = 1.0,
     body_mass_scale: float = 1.0,
     geom_friction_scale: float = 1.0,
+    geom_friction_component: int = -1,
     joint_damping_scale: float = 1.0,
     actuator_gain_scale: float = 1.0,
     actuator_bias_scale: float = 1.0,
+    gravity_component_index: int = -1,
+    gravity_component_value: float | None = None,
     body_name_selector: str | None = None,
     geom_name_selector: str | None = None,
     joint_name_selector: str | None = None,
@@ -136,6 +151,13 @@ def perturb_mujoco_xml(
     geom_names = _parse_name_selector(geom_name_selector)
     joint_names = _parse_name_selector(joint_name_selector)
     actuator_joints = _parse_name_selector(actuator_joint_selector)
+
+    if total_mass_scale != 1.0:
+        compiler = root.find("compiler")
+        if compiler is not None and "settotalmass" in compiler.attrib:
+            compiler.attrib["settotalmass"] = str(float(compiler.attrib["settotalmass"]) * total_mass_scale)
+        else:
+            body_mass_scale *= total_mass_scale
 
     if body_mass_scale != 1.0:
         default_density = _find_default_attr(root, "geom", "density")
@@ -175,8 +197,28 @@ def perturb_mujoco_xml(
         for geom in root.iter("geom"):
             if "friction" in geom.attrib and _matches_selector(geom.attrib.get("name"), geom_names):
                 fr = _float_list(geom.attrib["friction"])
-                fr = [v * geom_friction_scale for v in fr]
+                if geom_friction_component >= 0:
+                    if geom_friction_component >= len(fr):
+                        raise IndexError(
+                            f"geom_friction_component={geom_friction_component} out of range for friction={fr}"
+                        )
+                    fr[geom_friction_component] *= geom_friction_scale
+                else:
+                    fr = [v * geom_friction_scale for v in fr]
                 geom.attrib["friction"] = _format_floats(fr)
+
+    if gravity_component_index >= 0 and gravity_component_value is not None:
+        option = root.find("option")
+        if option is None:
+            option = ET.SubElement(root, "option")
+        gravity_text = option.attrib.get("gravity") or _find_option_attr(root, "gravity") or "0 0 -9.81"
+        gravity = _float_list(gravity_text)
+        if gravity_component_index >= len(gravity):
+            raise IndexError(
+                f"gravity_component_index={gravity_component_index} out of range for gravity={gravity}"
+            )
+        gravity[gravity_component_index] = gravity_component_value
+        option.attrib["gravity"] = _format_floats(gravity)
 
     if joint_damping_scale != 1.0:
         if joint_names:
@@ -239,11 +281,15 @@ def make_mujoco_env(
     *,
     xml_out_dir: str,
     run_name: str,
-    body_mass_scale: float,
-    geom_friction_scale: float,
-    joint_damping_scale: float,
-    actuator_gain_scale: float,
-    actuator_bias_scale: float,
+    total_mass_scale: float = 1.0,
+    body_mass_scale: float = 1.0,
+    geom_friction_scale: float = 1.0,
+    geom_friction_component: int = -1,
+    joint_damping_scale: float = 1.0,
+    actuator_gain_scale: float = 1.0,
+    actuator_bias_scale: float = 1.0,
+    gravity_component_index: int = -1,
+    gravity_component_value: float | None = None,
     body_name_selector: str | None = None,
     geom_name_selector: str | None = None,
     joint_name_selector: str | None = None,
@@ -256,11 +302,15 @@ def make_mujoco_env(
         base_xml,
         xml_out_dir,
         run_name=run_name,
+        total_mass_scale=total_mass_scale,
         body_mass_scale=body_mass_scale,
         geom_friction_scale=geom_friction_scale,
+        geom_friction_component=geom_friction_component,
         joint_damping_scale=joint_damping_scale,
         actuator_gain_scale=actuator_gain_scale,
         actuator_bias_scale=actuator_bias_scale,
+        gravity_component_index=gravity_component_index,
+        gravity_component_value=gravity_component_value,
         body_name_selector=body_name_selector,
         geom_name_selector=geom_name_selector,
         joint_name_selector=joint_name_selector,
