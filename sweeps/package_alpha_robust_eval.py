@@ -69,6 +69,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Disable per-line variance whiskers on return/gain plots.",
     )
+    parser.add_argument(
+        "--share-panel-y",
+        action="store_true",
+        help="Share y-axis limits across panel subplots. Disabled by default so each axis auto-scales independently.",
+    )
     return parser.parse_args()
 
 
@@ -608,6 +613,7 @@ def plot_return_curves(
     out_dir: Path,
     nominal_factor: float = 1.0,
     show_variance_whiskers: bool = True,
+    share_panel_y: bool = False,
 ) -> None:
     import matplotlib
     matplotlib.use("Agg")
@@ -616,7 +622,7 @@ def plot_return_curves(
     styles = build_model_styles(model_order)
 
     axes = sorted({row["axis"] for row in summary_rows})
-    fig, axs = plt.subplots(1, len(axes), figsize=(6 * len(axes), 4.8), sharey=True)
+    fig, axs = plt.subplots(1, len(axes), figsize=(6 * len(axes), 4.8), sharey=share_panel_y)
     if len(axes) == 1:
         axs = [axs]
 
@@ -707,6 +713,7 @@ def plot_gain_curves(
     out_dir: Path,
     nominal_factor: float = 1.0,
     show_variance_whiskers: bool = True,
+    share_panel_y: bool = False,
 ) -> None:
     import matplotlib
     matplotlib.use("Agg")
@@ -717,7 +724,7 @@ def plot_gain_curves(
 
     styles = build_model_styles(comparison_model_labels)
     axes = sorted({row["axis"] for row in gain_rows})
-    fig, axs = plt.subplots(1, len(axes), figsize=(6 * len(axes), 4.8), sharey=True)
+    fig, axs = plt.subplots(1, len(axes), figsize=(6 * len(axes), 4.8), sharey=share_panel_y)
     if len(axes) == 1:
         axs = [axs]
 
@@ -822,6 +829,54 @@ def plot_gain_curves(
         plt.close(fig)
 
 
+def generate_plot_variants(
+    rows: list[EvalRow],
+    summary_rows: list[dict[str, object]],
+    gain_rows: list[dict[str, object]],
+    baseline_model_label: str,
+    comparison_model_labels: list[str],
+    model_order: list[str],
+    display_map: dict[str, str],
+    plots_dir: Path,
+    nominal_factor: float = 1.0,
+    *,
+    include_with_variance: bool = True,
+    share_panel_y: bool = False,
+) -> None:
+    variant_dirs = {"without_variance": plots_dir / "without_variance"}
+    if include_with_variance:
+        variant_dirs["with_variance"] = plots_dir / "with_variance"
+
+    for show_variance_whiskers, variant_dir in [
+        (True, variant_dirs.get("with_variance")),
+        (False, variant_dirs["without_variance"]),
+    ]:
+        if variant_dir is None:
+            continue
+        variant_dir.mkdir(parents=True, exist_ok=True)
+        plot_return_curves(
+            rows,
+            summary_rows,
+            model_order,
+            display_map,
+            variant_dir,
+            nominal_factor=nominal_factor,
+            show_variance_whiskers=show_variance_whiskers,
+            share_panel_y=share_panel_y,
+        )
+        plot_gain_curves(
+            rows,
+            gain_rows,
+            baseline_model_label,
+            comparison_model_labels,
+            display_map,
+            variant_dir,
+            nominal_factor=nominal_factor,
+            show_variance_whiskers=show_variance_whiskers,
+            share_panel_y=share_panel_y,
+        )
+
+
 def markdown_table(headers: list[str], rows: list[list[str]]) -> list[str]:
     out = [
         "| " + " | ".join(headers) + " |",
@@ -920,12 +975,18 @@ def build_readme(
         "",
         "## Plot files",
         "",
-        "- `plots/return_curves_panel.png`",
-        "- `plots/gain_curves_panel.png`",
+        "- `plots/with_variance/`: full plot set with variance whiskers.",
+        "- `plots/without_variance/`: matching plot set without variance whiskers.",
+        "- `plots/with_variance/return_curves_panel.png`",
+        "- `plots/with_variance/gain_curves_panel.png`",
+        "- `plots/without_variance/return_curves_panel.png`",
+        "- `plots/without_variance/gain_curves_panel.png`",
     ]
     for axis in axes:
-        lines.append(f"- `plots/{axis}_return_curve.png`")
-        lines.append(f"- `plots/{axis}_gain_curve.png`")
+        lines.append(f"- `plots/with_variance/{axis}_return_curve.png`")
+        lines.append(f"- `plots/with_variance/{axis}_gain_curve.png`")
+        lines.append(f"- `plots/without_variance/{axis}_return_curve.png`")
+        lines.append(f"- `plots/without_variance/{axis}_gain_curve.png`")
 
     lines += [
         "",
@@ -1104,24 +1165,18 @@ def main() -> None:
         ],
     )
 
-    plot_return_curves(
+    generate_plot_variants(
         rows,
         summary_rows,
+        gain_rows,
+        args.baseline_model_label,
+        comparison_model_labels,
         model_order,
         display_map,
         plots_dir,
         nominal_factor=args.nominal_factor,
-        show_variance_whiskers=not args.disable_variance_whiskers,
-    )
-    plot_gain_curves(
-        rows,
-        gain_rows,
-        args.baseline_model_label,
-        comparison_model_labels,
-        display_map,
-        plots_dir,
-        nominal_factor=args.nominal_factor,
-        show_variance_whiskers=not args.disable_variance_whiskers,
+        include_with_variance=not args.disable_variance_whiskers,
+        share_panel_y=args.share_panel_y,
     )
 
     readme = build_readme(
