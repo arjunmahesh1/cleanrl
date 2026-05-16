@@ -122,6 +122,7 @@ def load_normalization_stats_if_available(envs, args: argparse.Namespace) -> boo
     obs_norm.obs_rms.mean = np.asarray(stats["obs_mean"], dtype=np.float64)
     obs_norm.obs_rms.var = np.asarray(stats["obs_var"], dtype=np.float64)
     obs_norm.obs_rms.count = float(np.asarray(stats["obs_count"], dtype=np.float64))
+    obs_norm.update_running_mean = False
 
     if not args.eval_raw_rewards:
         rew_norm = find_wrapper(env, gym.wrappers.NormalizeReward)
@@ -134,6 +135,7 @@ def load_normalization_stats_if_available(envs, args: argparse.Namespace) -> boo
         rew_norm.return_rms.mean = float(np.asarray(stats["ret_mean"], dtype=np.float64))
         rew_norm.return_rms.var = float(np.asarray(stats["ret_var"], dtype=np.float64))
         rew_norm.return_rms.count = float(np.asarray(stats["ret_count"], dtype=np.float64))
+        rew_norm.update_running_mean = False
         print(f"loaded observation+reward normalization stats from {norm_stats_path}")
     else:
         print(f"loaded observation normalization stats from {norm_stats_path} (raw rewards enabled)")
@@ -224,7 +226,12 @@ def evaluate_discrete(args: argparse.Namespace):
 
     def action_fn(obs):
         with torch.no_grad():
-            actions, _, _, _ = agent.get_action_and_value(torch.Tensor(obs).to(device))
+            obs_tensor = torch.Tensor(obs).to(device)
+            if args.deterministic_eval:
+                logits = agent.actor(obs_tensor)
+                actions = torch.argmax(logits, dim=1)
+            else:
+                actions, _, _, _ = agent.get_action_and_value(obs_tensor)
         return actions.cpu().numpy()
 
     episodic_returns = evaluate_with_hard_cap(
@@ -248,7 +255,11 @@ def evaluate_continuous(args: argparse.Namespace):
 
     def action_fn(obs):
         with torch.no_grad():
-            actions, _, _, _ = agent.get_action_and_value(torch.Tensor(obs).to(device))
+            obs_tensor = torch.Tensor(obs).to(device)
+            if args.deterministic_eval:
+                actions = agent.actor_mean(obs_tensor)
+            else:
+                actions, _, _, _ = agent.get_action_and_value(obs_tensor)
         return actions.cpu().numpy()
 
     episodic_returns = evaluate_with_hard_cap(
@@ -272,6 +283,7 @@ def main():
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--norm-stats-path", default="")
     parser.add_argument("--eval-raw-rewards", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--deterministic-eval", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--track", action="store_true")
     parser.add_argument("--wandb-project-name", default="cleanRL")
     parser.add_argument("--wandb-entity", default=None)
@@ -387,6 +399,7 @@ def main():
             "model_path": args.model_path,
             "norm_stats_path": args.norm_stats_path or f"{args.model_path}.norm_stats.npz",
             "eval_raw_rewards": int(args.eval_raw_rewards),
+            "deterministic_eval": int(args.deterministic_eval),
             "xml_perturb": int(args.xml_perturb),
             "obs_noise_std": args.obs_noise_std,
             "reward_noise_std": args.reward_noise_std,

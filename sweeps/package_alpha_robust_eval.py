@@ -43,6 +43,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--comparison-model-labels", nargs="*", default=[])
     parser.add_argument("--model-order", nargs="*", default=[])
     parser.add_argument(
+        "--exclude-model-labels",
+        nargs="*",
+        default=[],
+        help="Optional model labels to exclude from outputs and plots, e.g. a1e9.",
+    )
+    parser.add_argument(
         "--display-label",
         action="append",
         default=[],
@@ -73,6 +79,12 @@ def parse_args() -> argparse.Namespace:
         "--share-panel-y",
         action="store_true",
         help="Share y-axis limits across panel subplots. Disabled by default so each axis auto-scales independently.",
+    )
+    parser.add_argument(
+        "--panel-max-cols",
+        type=int,
+        default=4,
+        help="Maximum number of subplot columns in panel figures. Dense panels may auto-wrap to fewer columns for readability.",
     )
     return parser.parse_args()
 
@@ -614,19 +626,20 @@ def plot_return_curves(
     nominal_factor: float = 1.0,
     show_variance_whiskers: bool = True,
     share_panel_y: bool = False,
+    panel_max_cols: int = 4,
 ) -> None:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
+    configure_matplotlib_defaults(plt)
     styles = build_model_styles(model_order)
 
     axes = sorted({row["axis"] for row in summary_rows})
-    fig, axs = plt.subplots(1, len(axes), figsize=(6 * len(axes), 4.8), sharey=share_panel_y)
-    if len(axes) == 1:
-        axs = [axs]
+    fig, axs = build_panel_axes(plt, len(axes), panel_max_cols, share_panel_y)
+    used_axes = axs[: len(axes)]
 
-    for ax, axis in zip(axs, axes):
+    for ax, axis in zip(used_axes, axes):
         axis_rows = [row for row in summary_rows if row["axis"] == axis]
         for model_label in model_order:
             grows = sorted(
@@ -646,27 +659,40 @@ def plot_return_curves(
                 ys,
                 marker=style["marker"],
                 linestyle=style["linestyle"],
-                linewidth=2.2,
+                linewidth=2.8,
+                markersize=7.2,
                 color=color,
                 label=label,
             )
-            ax.fill_between(xs, ys - cis, ys + cis, color=color, alpha=0.18)
+            ax.fill_between(xs, ys - cis, ys + cis, color=color, alpha=0.16)
             if show_variance_whiskers:
                 add_max_return_spread_whisker(ax, rows, axis, model_label, color)
         ax.axvline(nominal_factor, color="#d62728", linestyle="--", linewidth=1.8, alpha=0.9)
         ax.set_title(axis.capitalize())
         ax.set_xlabel(f"{axis.capitalize()} scale")
         ax.grid(alpha=0.25)
+        ax.tick_params(labelsize=12)
 
-    axs[0].set_ylabel("Average reward")
-    handles, labels = axs[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="upper center", ncol=max(1, len(labels)))
-    fig.tight_layout(rect=(0, 0, 1, 0.92))
-    fig.savefig(out_dir / "return_curves_panel.png", dpi=180, bbox_inches="tight")
+    used_axes[0].set_ylabel("Average reward")
+    handles, labels = used_axes[0].get_legend_handles_labels()
+    fig.legend(
+        handles,
+        labels,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 1.03),
+        ncol=min(4, max(1, len(labels))),
+        frameon=False,
+        fontsize=12,
+        columnspacing=1.1,
+        handletextpad=0.5,
+        borderaxespad=0.0,
+    )
+    fig.tight_layout(rect=(0.02, 0.02, 0.98, 0.87))
+    save_figure_pair(fig, out_dir / "return_curves_panel", dpi=220)
     plt.close(fig)
 
     for axis in axes:
-        fig, ax = plt.subplots(figsize=(7.2, 5.2))
+        fig, ax = plt.subplots(figsize=(9.2, 6.6))
         axis_rows = [row for row in summary_rows if row["axis"] == axis]
         for model_label in model_order:
             grows = sorted(
@@ -686,11 +712,12 @@ def plot_return_curves(
                 ys,
                 marker=style["marker"],
                 linestyle=style["linestyle"],
-                linewidth=2.4,
+                linewidth=3.0,
+                markersize=7.8,
                 color=color,
                 label=label,
             )
-            ax.fill_between(xs, ys - cis, ys + cis, color=color, alpha=0.18)
+            ax.fill_between(xs, ys - cis, ys + cis, color=color, alpha=0.16)
             if show_variance_whiskers:
                 add_max_return_spread_whisker(ax, rows, axis, model_label, color)
         ax.axvline(nominal_factor, color="#d62728", linestyle="--", linewidth=1.8, alpha=0.9, label="Nominal scale")
@@ -698,9 +725,10 @@ def plot_return_curves(
         ax.set_ylabel("Average reward")
         ax.set_title(f"{axis.capitalize()} robustness")
         ax.grid(alpha=0.25)
-        ax.legend()
+        ax.tick_params(labelsize=12)
+        ax.legend(fontsize=11, frameon=False, ncol=min(2, max(1, len(model_order))))
         fig.tight_layout()
-        fig.savefig(out_dir / f"{axis}_return_curve.png", dpi=180, bbox_inches="tight")
+        save_figure_pair(fig, out_dir / f"{axis}_return_curve", dpi=220)
         plt.close(fig)
 
 
@@ -714,6 +742,7 @@ def plot_gain_curves(
     nominal_factor: float = 1.0,
     show_variance_whiskers: bool = True,
     share_panel_y: bool = False,
+    panel_max_cols: int = 4,
 ) -> None:
     import matplotlib
     matplotlib.use("Agg")
@@ -722,16 +751,16 @@ def plot_gain_curves(
     if not gain_rows:
         return
 
+    configure_matplotlib_defaults(plt)
     styles = build_model_styles(comparison_model_labels)
     axes = sorted({row["axis"] for row in gain_rows})
-    fig, axs = plt.subplots(1, len(axes), figsize=(6 * len(axes), 4.8), sharey=share_panel_y)
-    if len(axes) == 1:
-        axs = [axs]
+    fig, axs = build_panel_axes(plt, len(axes), panel_max_cols, share_panel_y)
+    used_axes = axs[: len(axes)]
 
     by_key = {(r.model_label, r.axis, r.factor, r.seed): r for r in rows}
     seeds = sorted({r.seed for r in rows})
 
-    for ax, axis in zip(axs, axes):
+    for ax, axis in zip(used_axes, axes):
         axis_rows = [row for row in gain_rows if row["axis"] == axis]
         for compare_label in comparison_model_labels:
             grows = sorted(
@@ -751,11 +780,12 @@ def plot_gain_curves(
                 ys,
                 marker=style["marker"],
                 linestyle=style["linestyle"],
-                linewidth=2.2,
+                linewidth=2.8,
+                markersize=7.2,
                 color=color,
                 label=label,
             )
-            ax.fill_between(xs, ys - cis, ys + cis, color=color, alpha=0.18)
+            ax.fill_between(xs, ys - cis, ys + cis, color=color, alpha=0.16)
             if show_variance_whiskers:
                 add_max_gain_spread_whisker(
                     ax,
@@ -772,16 +802,28 @@ def plot_gain_curves(
         ax.set_title(axis.capitalize())
         ax.set_xlabel(f"{axis.capitalize()} scale")
         ax.grid(alpha=0.25)
+        ax.tick_params(labelsize=12)
 
-    axs[0].set_ylabel("Robust gain (vanilla drop - model drop)")
-    handles, labels = axs[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="upper center", ncol=max(1, len(labels)))
-    fig.tight_layout(rect=(0, 0, 1, 0.92))
-    fig.savefig(out_dir / "gain_curves_panel.png", dpi=180, bbox_inches="tight")
+    used_axes[0].set_ylabel("Robust gain (vanilla drop - model drop)")
+    handles, labels = used_axes[0].get_legend_handles_labels()
+    fig.legend(
+        handles,
+        labels,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 1.03),
+        ncol=min(4, max(1, len(labels))),
+        frameon=False,
+        fontsize=12,
+        columnspacing=1.1,
+        handletextpad=0.5,
+        borderaxespad=0.0,
+    )
+    fig.tight_layout(rect=(0.02, 0.02, 0.98, 0.87))
+    save_figure_pair(fig, out_dir / "gain_curves_panel", dpi=220)
     plt.close(fig)
 
     for axis in axes:
-        fig, ax = plt.subplots(figsize=(7.2, 5.2))
+        fig, ax = plt.subplots(figsize=(9.2, 6.6))
         axis_rows = [row for row in gain_rows if row["axis"] == axis]
         for compare_label in comparison_model_labels:
             grows = sorted(
@@ -801,11 +843,12 @@ def plot_gain_curves(
                 ys,
                 marker=style["marker"],
                 linestyle=style["linestyle"],
-                linewidth=2.4,
+                linewidth=3.0,
+                markersize=7.8,
                 color=color,
                 label=label,
             )
-            ax.fill_between(xs, ys - cis, ys + cis, color=color, alpha=0.18)
+            ax.fill_between(xs, ys - cis, ys + cis, color=color, alpha=0.16)
             if show_variance_whiskers:
                 add_max_gain_spread_whisker(
                     ax,
@@ -823,10 +866,56 @@ def plot_gain_curves(
         ax.set_ylabel("Robust gain (higher is better)")
         ax.set_title(f"{axis.capitalize()} robust gain")
         ax.grid(alpha=0.25)
-        ax.legend()
+        ax.tick_params(labelsize=12)
+        ax.legend(fontsize=11, frameon=False, ncol=min(2, max(1, len(comparison_model_labels))))
         fig.tight_layout()
-        fig.savefig(out_dir / f"{axis}_gain_curve.png", dpi=180, bbox_inches="tight")
+        save_figure_pair(fig, out_dir / f"{axis}_gain_curve", dpi=220)
         plt.close(fig)
+
+
+def save_figure_pair(fig, stem: Path, dpi: int = 180) -> None:
+    fig.savefig(stem.with_suffix(".png"), dpi=dpi, bbox_inches="tight")
+    fig.savefig(stem.with_suffix(".pdf"), bbox_inches="tight")
+
+
+def configure_matplotlib_defaults(plt) -> None:
+    plt.rcParams.update(
+        {
+            "font.size": 13,
+            "axes.titlesize": 15,
+            "axes.labelsize": 14,
+            "xtick.labelsize": 12,
+            "ytick.labelsize": 12,
+            "legend.fontsize": 12,
+            "figure.titlesize": 16,
+        }
+    )
+
+
+def choose_panel_cols(num_axes: int, max_cols: int) -> int:
+    if num_axes <= 0:
+        return 1
+    if num_axes >= 10:
+        return min(max_cols, 3)
+    return min(max_cols, num_axes)
+
+
+def build_panel_axes(plt, num_axes: int, max_cols: int, share_panel_y: bool):
+    ncols = choose_panel_cols(num_axes, max_cols)
+    nrows = int(math.ceil(num_axes / ncols))
+    subplot_width = 5.8
+    subplot_height = 4.6
+    fig, axs = plt.subplots(
+        nrows,
+        ncols,
+        figsize=(subplot_width * ncols, subplot_height * nrows),
+        sharey=share_panel_y,
+        squeeze=False,
+    )
+    axs_flat = list(axs.ravel())
+    for ax in axs_flat[num_axes:]:
+        ax.set_visible(False)
+    return fig, axs_flat
 
 
 def generate_plot_variants(
@@ -842,6 +931,7 @@ def generate_plot_variants(
     *,
     include_with_variance: bool = True,
     share_panel_y: bool = False,
+    panel_max_cols: int = 4,
 ) -> None:
     variant_dirs = {"without_variance": plots_dir / "without_variance"}
     if include_with_variance:
@@ -863,6 +953,7 @@ def generate_plot_variants(
             nominal_factor=nominal_factor,
             show_variance_whiskers=show_variance_whiskers,
             share_panel_y=share_panel_y,
+            panel_max_cols=panel_max_cols,
         )
         plot_gain_curves(
             rows,
@@ -874,6 +965,7 @@ def generate_plot_variants(
             nominal_factor=nominal_factor,
             show_variance_whiskers=show_variance_whiskers,
             share_panel_y=share_panel_y,
+            panel_max_cols=panel_max_cols,
         )
 
 
@@ -921,6 +1013,7 @@ def build_readme(
         f"- Nominal reference within each axis is the `factor={nominal_factor}` point.",
         "- Curves show mean return across seeds with `95% CI` shading.",
         "- Robust gain is defined as `vanilla_drop - model_drop`; positive is better.",
+        "- Plot files are exported in both `PNG` and vector `PDF` format.",
         "",
         "## Model labels",
         "",
@@ -978,15 +1071,23 @@ def build_readme(
         "- `plots/with_variance/`: full plot set with variance whiskers.",
         "- `plots/without_variance/`: matching plot set without variance whiskers.",
         "- `plots/with_variance/return_curves_panel.png`",
+        "- `plots/with_variance/return_curves_panel.pdf`",
         "- `plots/with_variance/gain_curves_panel.png`",
+        "- `plots/with_variance/gain_curves_panel.pdf`",
         "- `plots/without_variance/return_curves_panel.png`",
+        "- `plots/without_variance/return_curves_panel.pdf`",
         "- `plots/without_variance/gain_curves_panel.png`",
+        "- `plots/without_variance/gain_curves_panel.pdf`",
     ]
     for axis in axes:
         lines.append(f"- `plots/with_variance/{axis}_return_curve.png`")
+        lines.append(f"- `plots/with_variance/{axis}_return_curve.pdf`")
         lines.append(f"- `plots/with_variance/{axis}_gain_curve.png`")
+        lines.append(f"- `plots/with_variance/{axis}_gain_curve.pdf`")
         lines.append(f"- `plots/without_variance/{axis}_return_curve.png`")
+        lines.append(f"- `plots/without_variance/{axis}_return_curve.pdf`")
         lines.append(f"- `plots/without_variance/{axis}_gain_curve.png`")
+        lines.append(f"- `plots/without_variance/{axis}_gain_curve.pdf`")
 
     lines += [
         "",
@@ -1015,6 +1116,15 @@ def main() -> None:
 
     display_map = parse_display_map(args.display_label)
     rows = load_latest_rows(raw_metrics_dir)
+    if args.exclude_model_labels:
+        excluded_models = set(args.exclude_model_labels)
+        if args.baseline_model_label in excluded_models:
+            raise RuntimeError(f"Baseline model {args.baseline_model_label!r} cannot be excluded.")
+        rows = [row for row in rows if row.model_label not in excluded_models]
+        if not rows:
+            raise RuntimeError(
+                f"All rows were excluded by --exclude-model-labels={sorted(excluded_models)}"
+            )
     if args.exclude_axes:
         excluded = set(args.exclude_axes)
         rows = [row for row in rows if row.axis not in excluded]
@@ -1027,6 +1137,7 @@ def main() -> None:
         if args.comparison_model_labels
         else [model for model in models if model != args.baseline_model_label]
     )
+    comparison_model_labels = [m for m in comparison_model_labels if m in models]
     model_order = (
         args.model_order
         if args.model_order
@@ -1177,6 +1288,7 @@ def main() -> None:
         nominal_factor=args.nominal_factor,
         include_with_variance=not args.disable_variance_whiskers,
         share_panel_y=args.share_panel_y,
+        panel_max_cols=args.panel_max_cols,
     )
 
     readme = build_readme(

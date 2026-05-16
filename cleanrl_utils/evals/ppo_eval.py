@@ -64,6 +64,7 @@ def load_normalization_stats_if_available(
     obs_norm.obs_rms.mean = np.asarray(stats["obs_mean"], dtype=np.float64)
     obs_norm.obs_rms.var = np.asarray(stats["obs_var"], dtype=np.float64)
     obs_norm.obs_rms.count = float(np.asarray(stats["obs_count"], dtype=np.float64))
+    obs_norm.update_running_mean = False
 
     if eval_raw_rewards:
         print(f"loaded observation normalization stats from {norm_stats_path} (raw rewards enabled)")
@@ -80,6 +81,7 @@ def load_normalization_stats_if_available(
     rew_norm.return_rms.mean = float(np.asarray(stats["ret_mean"], dtype=np.float64))
     rew_norm.return_rms.var = float(np.asarray(stats["ret_var"], dtype=np.float64))
     rew_norm.return_rms.count = float(np.asarray(stats["ret_count"], dtype=np.float64))
+    rew_norm.update_running_mean = False
     print(f"loaded observation+reward normalization stats from {norm_stats_path}")
     return True
 
@@ -98,6 +100,7 @@ def evaluate(
     eval_raw_rewards: bool = False,
     normalize_reward: bool = True,
     seed: int = 0,
+    deterministic: bool = True,
 ):
     eval_args = SimpleNamespace(
         xml_perturb=False,
@@ -131,13 +134,27 @@ def evaluate(
 
     obs, _ = envs.reset(seed=seed)
     episodic_returns = []
-    while len(episodic_returns) < eval_episodes:
-        actions, _, _, _ = agent.get_action_and_value(torch.Tensor(obs).to(device))
-        next_obs, _, _, _, infos = envs.step(actions.cpu().numpy())
-        for ep_return in extract_episode_returns_from_infos(infos):
-            print(f"eval_episode={len(episodic_returns)}, episodic_return={ep_return}")
-            episodic_returns += [ep_return]
-        obs = next_obs
+    try:
+        while len(episodic_returns) < eval_episodes:
+            obs_tensor = torch.Tensor(obs).to(device)
+            with torch.no_grad():
+                if deterministic:
+                    if hasattr(agent, "actor_mean"):
+                        actions = agent.actor_mean(obs_tensor)
+                    elif hasattr(agent, "actor"):
+                        logits = agent.actor(obs_tensor)
+                        actions = torch.argmax(logits, dim=1)
+                    else:
+                        raise AttributeError("Deterministic evaluation requires `actor_mean` or `actor` on the agent.")
+                else:
+                    actions, _, _, _ = agent.get_action_and_value(obs_tensor)
+            next_obs, _, _, _, infos = envs.step(actions.cpu().numpy())
+            for ep_return in extract_episode_returns_from_infos(infos):
+                print(f"eval_episode={len(episodic_returns)}, episodic_return={ep_return}")
+                episodic_returns += [ep_return]
+            obs = next_obs
+    finally:
+        envs.close()
 
     return episodic_returns
 
