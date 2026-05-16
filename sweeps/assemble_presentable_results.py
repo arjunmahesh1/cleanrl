@@ -50,6 +50,10 @@ def copy_if_exists(src: Path, dst: Path) -> None:
     if src.is_file():
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
+        if src.suffix == ".png":
+            pdf_src = src.with_suffix(".pdf")
+            if pdf_src.is_file():
+                shutil.copy2(pdf_src, dst.with_suffix(".pdf"))
 
 
 def copy_globs(src_dir: Path, dst_dir: Path, patterns: list[str]) -> None:
@@ -96,6 +100,7 @@ def write_readme(path: Path, title: str, categories: list[str]) -> None:
         "Structure:",
         "- `plots/with_variance/`",
         "- `plots/without_variance/`",
+        "- Each plot is stored as both `PNG` and `PDF` when available from the packaged source folders.",
         "- `regeneration_sources/`",
         "",
         "Categories:",
