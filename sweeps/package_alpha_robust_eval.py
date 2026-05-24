@@ -155,6 +155,7 @@ def load_latest_rows(raw_metrics_dir: Path) -> list[EvalRow]:
         with csv_path.open(newline="", encoding="utf-8") as fobj:
             reader = csv.DictReader(fobj)
             for line_no, row in enumerate(reader, start=2):
+                row = repair_mixed_schema_row(reader.fieldnames or [], row)
                 try:
                     scenario_label = row["scenario_label"]
                     axis, factor = split_scenario_label(scenario_label)
@@ -194,6 +195,33 @@ def load_latest_rows(raw_metrics_dir: Path) -> list[EvalRow]:
     if not latest:
         raise RuntimeError(f"No valid rows found in {raw_metrics_dir}")
     return sorted(latest.values(), key=lambda r: (r.axis, r.factor, r.model_label, r.seed))
+
+
+def repair_mixed_schema_row(fieldnames: list[str], row: dict[str, object]) -> dict[str, object]:
+    """Repair raw metric files that append newer rows under an older header.
+
+    Some Walker raw_metrics files were first written before the
+    `deterministic_eval` column existed, then appended to after the column was
+    added.  The CSV header therefore lacks `deterministic_eval`, while newer
+    data rows contain one extra field after `eval_raw_rewards`.  `csv.DictReader`
+    stores the final extra value under `None` and shifts every downstream field,
+    which can make `mean_return` appear as the XML bias scale (often `1.0`).
+    Reconstructing the row with the inserted column preserves the latest eval.
+    """
+    extras = row.get(None)
+    if (
+        extras
+        and isinstance(extras, list)
+        and len(extras) == 1
+        and "deterministic_eval" not in fieldnames
+        and "eval_raw_rewards" in fieldnames
+    ):
+        values = [row.get(name, "") for name in fieldnames] + extras
+        repaired_fieldnames = list(fieldnames)
+        insert_at = repaired_fieldnames.index("eval_raw_rewards") + 1
+        repaired_fieldnames.insert(insert_at, "deterministic_eval")
+        return dict(zip(repaired_fieldnames, values))
+    return row
 
 
 def write_eval_metrics(rows: list[EvalRow], path: Path) -> None:

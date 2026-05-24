@@ -40,6 +40,8 @@ class Args:
     """whether to capture videos of the agent performances (check out `videos` folder)"""
     save_model: bool = False
     """whether to save model into the `runs/{run_name}` folder"""
+    checkpoint_interval: int = 0
+    """save intermediate checkpoints every N environment steps (0 disables intermediate checkpoints)"""
     upload_model: bool = False
     """whether to upload the saved model to huggingface"""
     hf_entity: str = ""
@@ -475,9 +477,19 @@ if __name__ == "__main__":
     # TRY NOT TO MODIFY: start the game
     global_step = 0
     start_time = time.time()
+    next_checkpoint_step = args.checkpoint_interval if args.checkpoint_interval > 0 else None
     next_obs, _ = envs.reset(seed=args.seed)
     next_obs = torch.Tensor(next_obs).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
+
+    if next_checkpoint_step is not None:
+        checkpoint_dir = os.path.join(args.run_dir, run_name, "checkpoints")
+        Path(checkpoint_dir).mkdir(parents=True, exist_ok=True)
+        checkpoint_path = os.path.join(checkpoint_dir, f"{args.exp_name}_step_0.cleanrl_model")
+        torch.save(agent.state_dict(), checkpoint_path)
+        norm_stats_path = save_normalization_stats(envs, checkpoint_path)
+        print(f"checkpoint saved to {checkpoint_path}")
+        print(f"checkpoint normalization stats saved to {norm_stats_path}")
 
     for iteration in range(1, args.num_iterations + 1):
         # Annealing the rate if instructed to do so.
@@ -688,6 +700,17 @@ if __name__ == "__main__":
             writer.add_scalar("robust/tv_adv_std", tv_adv_std.item(), global_step)
         print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+
+        if next_checkpoint_step is not None and global_step >= next_checkpoint_step:
+            checkpoint_dir = os.path.join(args.run_dir, run_name, "checkpoints")
+            Path(checkpoint_dir).mkdir(parents=True, exist_ok=True)
+            checkpoint_path = os.path.join(checkpoint_dir, f"{args.exp_name}_step_{global_step}.cleanrl_model")
+            torch.save(agent.state_dict(), checkpoint_path)
+            norm_stats_path = save_normalization_stats(envs, checkpoint_path)
+            print(f"checkpoint saved to {checkpoint_path}")
+            print(f"checkpoint normalization stats saved to {norm_stats_path}")
+            while next_checkpoint_step <= global_step:
+                next_checkpoint_step += args.checkpoint_interval
 
     if args.save_model:
         model_path = os.path.join(args.run_dir, run_name, f"{args.exp_name}.cleanrl_model")
