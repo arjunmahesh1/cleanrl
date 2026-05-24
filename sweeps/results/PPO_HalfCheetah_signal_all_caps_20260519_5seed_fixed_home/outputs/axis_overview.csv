@@ -1,0 +1,4 @@
+axis,model_label,nominal_mean_return,nominal_mean_return_ci95,avg_gain_mean_return,avg_gain_mean_return_ci95,positive_gain_scenarios,perturbed_scenarios
+action_noise,vanilla,2114.6774611168157,911.9728675667765,0.0,0.0,0,0
+action_noise_bernoulli,vanilla,2114.6774611168157,911.9728675667765,0.0,0.0,0,0
+state_noise,vanilla,2108.188565936946,905.4240259625153,0.0,0.0,0,0
