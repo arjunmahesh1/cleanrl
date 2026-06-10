@@ -2,7 +2,6 @@
 
 Research code for investigating whether upper-tail value-target clipping in PPO instantiates a TV-ball distributionally robust MDP, and whether the theoretical robustness guarantee transfers empirically under MuJoCo dynamics shifts.
 
-**Advisor:** Prof. Xu | **Institution:** Duke University
 
 ---
 
@@ -93,17 +92,6 @@ python sweeps/package_alpha_robust_eval.py \
   --raw-metrics-dir sweeps/results/<folder>/raw_metrics \
   --out-dir sweeps/results/<folder>
 ```
-
----
-
-## Key Findings
-
-- TV-capping yields **perturbation-dependent** robustness benefits — strongest on actuator gain and mass reduction, absent on friction and damping.
-- The mechanism is **failure-rate reduction**, not mean-return improvement: 30-seed analysis shows Walker2d catastrophic failure rate drops 37% → 23% under mass perturbation at the optimal cap.
-- Optimal α is environment-specific: ~2.85 for Walker2d, ~2.20–2.55 for HalfCheetah.
-- Both environments exhibit **bimodal return distributions** under perturbation (walk vs. fall), making failure-rate the appropriate primary metric rather than mean return.
-
-See `PROJECT_STATUS.md` for full experiment timeline and current status.
 
 ---
 
