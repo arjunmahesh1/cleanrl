@@ -1,3 +1,5 @@
+AGENTS.md
+PROJECT_STATUS.md
 slurm-*.out
 .claude/
 cluster_rl_runs/

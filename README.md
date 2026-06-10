@@ -52,8 +52,7 @@ slurm/
   submit_ppo_vanilla_noop_paired_nodes.sh
 
 evaluate_ppo_robust.py        # Canonical robustness eval script
-AGENTS.md                     # Agent/session onboarding notes
-PROJECT_STATUS.md             # Current experiment status and findings
+
 ```
 
 ---
