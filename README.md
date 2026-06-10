@@ -51,6 +51,7 @@ slurm/
   submit_ppo_final_pinned_and_eval.sh  # Pinned train + eval
   submit_ppo_vanilla_noop_paired_nodes.sh
 
+archive/                      # Historical bundles, logs, local generated outputs
 evaluate_ppo_robust.py        # Canonical robustness eval script
 
 ```
