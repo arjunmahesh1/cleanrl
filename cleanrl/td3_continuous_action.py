@@ -14,6 +14,8 @@ import tyro
 from torch.utils.tensorboard import SummaryWriter
 
 from cleanrl_utils.buffers import ReplayBuffer
+from cleanrl_utils.mujoco_xml_utils import make_mujoco_env
+from cleanrl_utils.perturbation_config import apply_env_perturbations
 
 
 @dataclass
@@ -40,6 +42,8 @@ class Args:
     """whether to upload the saved model to huggingface"""
     hf_entity: str = ""
     """the user or org name of the model repository from the Hugging Face Hub"""
+    run_dir: str = "runs"
+    """base directory for TensorBoard logs and saved models"""
 
     # Algorithm specific arguments
     env_id: str = "Hopper-v4"
@@ -68,15 +72,77 @@ class Args:
     """the frequency of training policy (delayed)"""
     noise_clip: float = 0.5
     """noise clip parameter of the Target Policy Smoothing Regularization"""
+    tv_clip_q_targets: bool = False
+    """if true, apply an upper cap to the bootstrapped TD3 target Q value"""
+    tv_fixed_cap: float | None = None
+    """fixed one-sided cap for min target Q before constructing the TD target"""
 
 
-def make_env(env_id, seed, idx, capture_video, run_name):
+def _needs_xml_perturbation(perturb) -> bool:
+    if perturb is None:
+        return False
+    return any(
+        [
+            getattr(perturb, "xml_perturb", False),
+            getattr(perturb, "xml_total_mass_scale", 1.0) != 1.0,
+            getattr(perturb, "xml_body_mass_scale", 1.0) != 1.0,
+            getattr(perturb, "xml_geom_friction_scale", 1.0) != 1.0,
+            getattr(perturb, "xml_gravity_component_index", -1) >= 0
+            and getattr(perturb, "xml_gravity_component_value", None) is not None,
+            getattr(perturb, "xml_joint_damping_scale", 1.0) != 1.0,
+            getattr(perturb, "xml_actuator_gain_scale", 1.0) != 1.0,
+            getattr(perturb, "xml_actuator_bias_scale", 1.0) != 1.0,
+            bool(getattr(perturb, "xml_body_name_selector", "")),
+            bool(getattr(perturb, "xml_geom_name_selector", "")),
+            bool(getattr(perturb, "xml_joint_name_selector", "")),
+            bool(getattr(perturb, "xml_actuator_joint_selector", "")),
+        ]
+    )
+
+
+def make_env(env_id, seed, idx, capture_video, run_name, perturb=None):
     def thunk():
-        if capture_video and idx == 0:
-            env = gym.make(env_id, render_mode="rgb_array")
-            env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
+        if _needs_xml_perturbation(perturb):
+            env = make_mujoco_env(
+                env_id,
+                xml_out_dir=getattr(perturb, "xml_out_dir", "perturbed_xml"),
+                run_name=run_name,
+                total_mass_scale=getattr(perturb, "xml_total_mass_scale", 1.0),
+                body_mass_scale=getattr(perturb, "xml_body_mass_scale", 1.0),
+                body_name_selector=getattr(perturb, "xml_body_name_selector", ""),
+                geom_friction_scale=getattr(perturb, "xml_geom_friction_scale", 1.0),
+                geom_friction_component=getattr(perturb, "xml_geom_friction_component", -1),
+                geom_name_selector=getattr(perturb, "xml_geom_name_selector", ""),
+                joint_damping_scale=getattr(perturb, "xml_joint_damping_scale", 1.0),
+                joint_name_selector=getattr(perturb, "xml_joint_name_selector", ""),
+                actuator_gain_scale=getattr(perturb, "xml_actuator_gain_scale", 1.0),
+                actuator_bias_scale=getattr(perturb, "xml_actuator_bias_scale", 1.0),
+                gravity_component_index=getattr(perturb, "xml_gravity_component_index", -1),
+                gravity_component_value=getattr(perturb, "xml_gravity_component_value", None),
+                actuator_joint_selector=getattr(perturb, "xml_actuator_joint_selector", ""),
+                xml_path_override=getattr(perturb, "xml_path_override", None),
+                render_mode="rgb_array" if capture_video and idx == 0 else None,
+            )
         else:
-            env = gym.make(env_id)
+            if capture_video and idx == 0:
+                env = gym.make(env_id, render_mode="rgb_array")
+            else:
+                env = gym.make(env_id)
+        env = apply_env_perturbations(
+            env,
+            obs_noise_std=getattr(perturb, "obs_noise_std", 0.0),
+            obs_noise_clip=getattr(perturb, "obs_noise_clip", None),
+            reward_noise_std=getattr(perturb, "reward_noise_std", 0.0),
+            action_noise_std=getattr(perturb, "action_noise_std", 0.0),
+            action_noise_clip=getattr(perturb, "action_noise_clip", None),
+            action_replace_prob=getattr(perturb, "action_replace_prob", 0.0),
+            param_override_spec=getattr(perturb, "param_override", ""),
+            param_randomize_spec=getattr(perturb, "param_randomize", ""),
+            param_strict=getattr(perturb, "param_strict", True),
+            seed=seed,
+        )
+        if capture_video and idx == 0:
+            env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env.action_space.seed(seed)
         return env
@@ -135,7 +201,10 @@ class Actor(nn.Module):
 if __name__ == "__main__":
 
     args = tyro.cli(Args)
+    if args.tv_clip_q_targets and args.tv_fixed_cap is None:
+        raise ValueError("--tv-fixed-cap is required when --tv-clip-q-targets is enabled")
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+    run_path = os.path.join(args.run_dir, run_name)
     if args.track:
         import wandb
 
@@ -148,7 +217,7 @@ if __name__ == "__main__":
             monitor_gym=True,
             save_code=True,
         )
-    writer = SummaryWriter(f"runs/{run_name}")
+    writer = SummaryWriter(run_path)
     writer.add_text(
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
@@ -217,9 +286,10 @@ if __name__ == "__main__":
 
         # TRY NOT TO MODIFY: save data to reply buffer; handle `final_observation`
         real_next_obs = next_obs.copy()
+        final_observations = infos.get("final_observation")
         for idx, trunc in enumerate(truncations):
-            if trunc:
-                real_next_obs[idx] = infos["final_observation"][idx]
+            if trunc and final_observations is not None and final_observations[idx] is not None:
+                real_next_obs[idx] = final_observations[idx]
         rb.add(obs, real_next_obs, actions, rewards, terminations, infos)
 
         # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
@@ -239,6 +309,17 @@ if __name__ == "__main__":
                 qf1_next_target = qf1_target(data.next_observations, next_state_actions)
                 qf2_next_target = qf2_target(data.next_observations, next_state_actions)
                 min_qf_next_target = torch.min(qf1_next_target, qf2_next_target)
+                min_qf_next_target_pre_clip = min_qf_next_target.view(-1)
+                target_q_clip_fraction = None
+                target_q_clip_count = None
+                target_q_excess_mean = None
+                if args.tv_clip_q_targets:
+                    cap = float(args.tv_fixed_cap)
+                    target_q_clip_fraction = (min_qf_next_target_pre_clip > cap).float().mean()
+                    target_q_clip_count = (min_qf_next_target_pre_clip > cap).float().sum()
+                    target_q_excess_mean = torch.clamp(min_qf_next_target_pre_clip - cap, min=0.0).mean()
+                    min_qf_next_target = torch.clamp(min_qf_next_target, max=cap)
+                min_qf_next_target_post_clip = min_qf_next_target.view(-1)
                 next_q_value = data.rewards.flatten() + (1 - data.dones.flatten()) * args.gamma * (min_qf_next_target).view(-1)
 
             qf1_a_values = qf1(data.observations, data.actions).view(-1)
@@ -273,6 +354,18 @@ if __name__ == "__main__":
                 writer.add_scalar("losses/qf2_loss", qf2_loss.item(), global_step)
                 writer.add_scalar("losses/qf_loss", qf_loss.item() / 2.0, global_step)
                 writer.add_scalar("losses/actor_loss", actor_loss.item(), global_step)
+                writer.add_scalar("targets/min_q_next_mean_pre_clip", min_qf_next_target_pre_clip.mean().item(), global_step)
+                writer.add_scalar("targets/min_q_next_max_pre_clip", min_qf_next_target_pre_clip.max().item(), global_step)
+                writer.add_scalar("targets/min_q_next_p95_pre_clip", torch.quantile(min_qf_next_target_pre_clip, 0.95).item(), global_step)
+                writer.add_scalar("targets/min_q_next_p99_pre_clip", torch.quantile(min_qf_next_target_pre_clip, 0.99).item(), global_step)
+                writer.add_scalar("targets/min_q_next_mean_post_clip", min_qf_next_target_post_clip.mean().item(), global_step)
+                writer.add_scalar("targets/td_target_mean", next_q_value.mean().item(), global_step)
+                writer.add_scalar("targets/td_target_max", next_q_value.max().item(), global_step)
+                if args.tv_clip_q_targets:
+                    writer.add_scalar("robust/td3_q_target_fixed_cap", float(args.tv_fixed_cap), global_step)
+                    writer.add_scalar("robust/td3_q_target_clip_fraction", target_q_clip_fraction.item(), global_step)
+                    writer.add_scalar("robust/td3_q_target_clip_count", target_q_clip_count.item(), global_step)
+                    writer.add_scalar("robust/td3_q_target_excess_mean", target_q_excess_mean.item(), global_step)
                 print("SPS:", int(global_step / (time.time() - start_time)))
                 writer.add_scalar(
                     "charts/SPS",
@@ -281,7 +374,7 @@ if __name__ == "__main__":
                 )
 
     if args.save_model:
-        model_path = f"runs/{run_name}/{args.exp_name}.cleanrl_model"
+        model_path = os.path.join(run_path, f"{args.exp_name}.cleanrl_model")
         torch.save((actor.state_dict(), qf1.state_dict(), qf2.state_dict()), model_path)
         print(f"model saved to {model_path}")
         from cleanrl_utils.evals.td3_eval import evaluate
@@ -294,7 +387,7 @@ if __name__ == "__main__":
             run_name=f"{run_name}-eval",
             Model=(Actor, QNetwork),
             device=device,
-            exploration_noise=args.exploration_noise,
+            exploration_noise=0.0,
         )
         for idx, episodic_return in enumerate(episodic_returns):
             writer.add_scalar("eval/episodic_return", episodic_return, idx)
@@ -309,7 +402,7 @@ if __name__ == "__main__":
                 episodic_returns,
                 repo_id,
                 "TD3",
-                f"runs/{run_name}",
+                run_path,
                 f"videos/{run_name}-eval",
             )
 
