@@ -1,37 +1,40 @@
 #!/usr/bin/env bash
 # Example:
-#   QCAP_VALUES_STR="vanilla 50 75 100" SEED_VALUES_STR="1 2 3 4 5" \
-#   sbatch --array=0-19 slurm/train_td3_qcap_grid.sh
+#   BETA_VALUES_STR="vanilla 0.5 1 2 5 10 20 50 100" SEED_VALUES_STR="1 2 3 4 5" \
+#   sbatch --array=0-39 slurm/train_td3_kl_beta_grid.sh
 #
-# The array index maps to (q cap, seed). Use qcap token "vanilla" for
-# unclipped TD3; all numeric tokens enable --tv-clip-q-targets.
+# The array index maps to (KL beta, seed). Use beta token "vanilla" for
+# ordinary TD3; all numeric tokens enable --robust-target-mode kl_moment.
 
 #SBATCH -p compsci-gpu
 #SBATCH --gres=gpu:1
 #SBATCH --mem=32G
 #SBATCH --cpus-per-task=8
 #SBATCH --time=08:00:00
-#SBATCH -J td3_qcap_train
+#SBATCH -J td3_kl_train
 
 set -euo pipefail
 
 ROOT="${ROOT:-$HOME/cleanrl}"
-RUN_DIR="${RUN_DIR:-$HOME/rl_runs_td3_qcap_grid}"
+RUN_DIR="${RUN_DIR:-$HOME/rl_runs_td3_kl_beta_grid}"
 ENV_ID="${ENV_ID:-Walker2d-v4}"
-PROJECT="${PROJECT:-td3-qcap}"
-GROUP="${GROUP:-td3-qcap-grid-train}"
+PROJECT="${PROJECT:-td3-kl-moment}"
+GROUP="${GROUP:-td3-kl-beta-grid-train}"
 ENTITY="${ENTITY:-}"
-EXP_PREFIX="${EXP_PREFIX:-td3_qcap}"
-VARIANT_PREFIX="${VARIANT_PREFIX:-q}"
-QCAP_VALUES_STR="${QCAP_VALUES_STR:-vanilla 50 75 100}"
+EXP_PREFIX="${EXP_PREFIX:-td3_kl}"
+VARIANT_PREFIX="${VARIANT_PREFIX:-klb}"
+BETA_VALUES_STR="${BETA_VALUES_STR:-vanilla 0.5 1 2 5 10 20 50 100}"
 SEED_VALUES_STR="${SEED_VALUES_STR:-1 2 3 4 5}"
 TOTAL_TIMESTEPS="${TOTAL_TIMESTEPS:-1000000}"
+REWARD_SCALE="${REWARD_SCALE:-0.01}"
+KL_LOG_MOMENT_EXP_MIN="${KL_LOG_MOMENT_EXP_MIN:--80}"
+KL_LOG_MOMENT_EXP_MAX="${KL_LOG_MOMENT_EXP_MAX:-20}"
 TRACK="${TRACK:-false}"
 SAVE_MODEL="${SAVE_MODEL:-true}"
 TORCH_DETERMINISTIC="${TORCH_DETERMINISTIC:-true}"
 PY="${PY:-}"
 
-read -r -a QCAP_VALUES <<< "${QCAP_VALUES_STR}"
+read -r -a BETA_VALUES <<< "${BETA_VALUES_STR}"
 read -r -a SEED_VALUES <<< "${SEED_VALUES_STR}"
 
 if [[ -z "${SLURM_ARRAY_TASK_ID:-}" ]]; then
@@ -39,9 +42,9 @@ if [[ -z "${SLURM_ARRAY_TASK_ID:-}" ]]; then
     exit 1
 fi
 
-num_caps=${#QCAP_VALUES[@]}
+num_betas=${#BETA_VALUES[@]}
 num_seeds=${#SEED_VALUES[@]}
-total_jobs=$((num_caps * num_seeds))
+total_jobs=$((num_betas * num_seeds))
 
 if (( SLURM_ARRAY_TASK_ID >= total_jobs )); then
     echo "Array index ${SLURM_ARRAY_TASK_ID} exceeds grid size ${total_jobs}; exiting."
@@ -63,32 +66,28 @@ sanitize_token() {
     echo "${token}"
 }
 
-resolve_qcap_variant() {
+resolve_beta_variant() {
     local token="$1"
     case "${token}" in
         vanilla)
             RESOLVED_LABEL="vanilla"
-            RESOLVED_CAP=""
-            ;;
-        noop|q1e9|1e9|1000000000|1000000000.0)
-            RESOLVED_LABEL="q1e9"
-            RESOLVED_CAP="1000000000"
+            RESOLVED_BETA=""
             ;;
         *)
             RESOLVED_LABEL="${VARIANT_PREFIX}$(sanitize_token "${token}")"
-            RESOLVED_CAP="${token}"
+            RESOLVED_BETA="${token}"
             ;;
     esac
 }
 
-cap_idx=$((SLURM_ARRAY_TASK_ID / num_seeds))
+beta_idx=$((SLURM_ARRAY_TASK_ID / num_seeds))
 seed_idx=$((SLURM_ARRAY_TASK_ID % num_seeds))
-qcap="${QCAP_VALUES[$cap_idx]}"
+beta="${BETA_VALUES[$beta_idx]}"
 seed="${SEED_VALUES[$seed_idx]}"
 
-resolve_qcap_variant "${qcap}"
+resolve_beta_variant "${beta}"
 variant_label="${RESOLVED_LABEL}"
-resolved_cap="${RESOLVED_CAP}"
+resolved_beta="${RESOLVED_BETA}"
 
 exp_name="${EXP_PREFIX}_${variant_label}"
 
@@ -106,6 +105,7 @@ cmd=(
     --seed "${seed}"
     --total-timesteps "${TOTAL_TIMESTEPS}"
     --run-dir "${RUN_DIR}"
+    --reward-scale "${REWARD_SCALE}"
 )
 
 if [[ "${TRACK}" == "true" ]]; then
@@ -125,16 +125,22 @@ else
     cmd+=(--no-torch-deterministic)
 fi
 
-if [[ -n "${resolved_cap}" ]]; then
-    cmd+=(--tv-clip-q-targets --tv-fixed-cap "${resolved_cap}")
+if [[ -n "${resolved_beta}" ]]; then
+    cmd+=(
+        --robust-target-mode kl_moment
+        --kl-beta "${resolved_beta}"
+        --kl-log-moment-exp-min "${KL_LOG_MOMENT_EXP_MIN}"
+        --kl-log-moment-exp-max "${KL_LOG_MOMENT_EXP_MAX}"
+    )
 fi
 
-echo "[$(date)] training TD3 qcap-grid job"
+echo "[$(date)] training TD3 KL beta-grid job"
 echo "  env_id=${ENV_ID}"
 echo "  exp_name=${exp_name}"
-echo "  qcap=${qcap}"
+echo "  beta=${beta}"
 echo "  seed=${seed}"
 echo "  total_timesteps=${TOTAL_TIMESTEPS}"
+echo "  reward_scale=${REWARD_SCALE}"
 echo "  run_dir=${RUN_DIR}"
 printf '  command='
 printf ' %q' "${cmd[@]}"

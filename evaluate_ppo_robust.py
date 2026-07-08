@@ -282,7 +282,8 @@ def evaluate_td3(args: argparse.Namespace):
     actor = TD3Actor(envs).to(device)
     qf1 = TD3QNetwork(envs).to(device)
     qf2 = TD3QNetwork(envs).to(device)
-    actor_params, qf1_params, qf2_params = torch.load(args.model_path, map_location=device)
+    checkpoint = torch.load(args.model_path, map_location=device)
+    actor_params, qf1_params, qf2_params = checkpoint[:3]
     actor.load_state_dict(actor_params)
     qf1.load_state_dict(qf1_params)
     qf2.load_state_dict(qf2_params)
