@@ -29,6 +29,10 @@ TOTAL_TIMESTEPS="${TOTAL_TIMESTEPS:-1000000}"
 REWARD_SCALE="${REWARD_SCALE:-0.01}"
 KL_LOG_MOMENT_EXP_MIN="${KL_LOG_MOMENT_EXP_MIN:--80}"
 KL_LOG_MOMENT_EXP_MAX="${KL_LOG_MOMENT_EXP_MAX:-20}"
+KL_NEXT_STATE_SAMPLES="${KL_NEXT_STATE_SAMPLES:-1}"
+KL_NEXT_OBS_NOISE_STD="${KL_NEXT_OBS_NOISE_STD:-0}"
+KL_NEXT_OBS_NOISE_RELATIVE="${KL_NEXT_OBS_NOISE_RELATIVE:-true}"
+KL_NEXT_OBS_NOISE_CLIP="${KL_NEXT_OBS_NOISE_CLIP:-3.0}"
 TRACK="${TRACK:-false}"
 SAVE_MODEL="${SAVE_MODEL:-true}"
 TORCH_DETERMINISTIC="${TORCH_DETERMINISTIC:-true}"
@@ -131,7 +135,13 @@ if [[ -n "${resolved_beta}" ]]; then
         --kl-beta "${resolved_beta}"
         --kl-log-moment-exp-min "${KL_LOG_MOMENT_EXP_MIN}"
         --kl-log-moment-exp-max "${KL_LOG_MOMENT_EXP_MAX}"
+        --kl-next-state-samples "${KL_NEXT_STATE_SAMPLES}"
+        --kl-next-obs-noise-std "${KL_NEXT_OBS_NOISE_STD}"
+        --kl-next-obs-noise-clip "${KL_NEXT_OBS_NOISE_CLIP}"
     )
+    if [[ "${KL_NEXT_OBS_NOISE_RELATIVE}" == "false" ]]; then
+        cmd+=(--no-kl-next-obs-noise-relative)
+    fi
 fi
 
 echo "[$(date)] training TD3 KL beta-grid job"
@@ -141,6 +151,9 @@ echo "  beta=${beta}"
 echo "  seed=${seed}"
 echo "  total_timesteps=${TOTAL_TIMESTEPS}"
 echo "  reward_scale=${REWARD_SCALE}"
+echo "  kl_next_state_samples=${KL_NEXT_STATE_SAMPLES}"
+echo "  kl_next_obs_noise_std=${KL_NEXT_OBS_NOISE_STD}"
+echo "  kl_next_obs_noise_relative=${KL_NEXT_OBS_NOISE_RELATIVE}"
 echo "  run_dir=${RUN_DIR}"
 printf '  command='
 printf ' %q' "${cmd[@]}"

@@ -88,7 +88,17 @@ def model_sort_key(label: str) -> tuple[int, float, str]:
     if match:
         value = float(f"{match.group(1)}.{match.group(2)}")
         return (1, value, label)
-    return (2, math.inf, label)
+    match = re.fullmatch(r"(klb|kle)(\d+)(?:p(\d+))?", label)
+    if match:
+        frac = match.group(3) or "0"
+        value = float(f"{match.group(2)}.{frac}")
+        return (2 if match.group(1) == "klb" else 3, value, label)
+    match = re.fullmatch(r"q(\d+)(?:p(\d+))?", label)
+    if match:
+        frac = match.group(2) or "0"
+        value = float(f"{match.group(1)}.{frac}")
+        return (4, value, label)
+    return (5, math.inf, label)
 
 
 def display_model(label: str) -> str:
@@ -97,6 +107,17 @@ def display_model(label: str) -> str:
     match = re.fullmatch(r"a(\d+)p(\d+)", label)
     if match:
         return f"c={match.group(1)}.{match.group(2)}"
+    match = re.fullmatch(r"(klb|kle)(\d+)(?:p(\d+))?", label)
+    if match:
+        frac = match.group(3)
+        beta = match.group(2) if frac is None else f"{match.group(2)}.{frac}"
+        prefix = r"$\beta" if match.group(1) == "klb" else r"$K$-KL $\beta"
+        return rf"{prefix}={beta}$"
+    match = re.fullmatch(r"q(\d+)(?:p(\d+))?", label)
+    if match:
+        frac = match.group(2)
+        cap = match.group(1) if frac is None else f"{match.group(1)}.{frac}"
+        return f"q={cap}"
     return label
 
 
@@ -145,7 +166,8 @@ def load_metrics(result_dir: Path) -> pd.DataFrame:
         parsed = df["scenario_label"].map(parse_factor_from_scenario)
         df["axis"] = parsed.map(lambda x: x[0])
         df["factor"] = parsed.map(lambda x: x[1])
-    df = df[df["model_label"].isin(["vanilla"]) | df["model_label"].str.match(r"^a\d+p\d+$", na=False)].copy()
+    model_pattern = r"^(a\d+p\d+|klb\d+(p\d+)?|kle\d+(p\d+)?|q\d+(p\d+)?)$"
+    df = df[df["model_label"].isin(["vanilla"]) | df["model_label"].str.match(model_pattern, na=False)].copy()
     df["factor"] = df["factor"].astype(float)
     df["seed"] = df["seed"].astype(int)
     df["mean_return"] = df["mean_return"].astype(float)
@@ -298,7 +320,7 @@ def plot_seed_spaghetti(df: pd.DataFrame, out_dir: Path, formats: list[str]) -> 
         models = sorted(sub["model_label"].unique(), key=model_sort_key)
         nrows, ncols = figure_grid(len(models), max_cols=4)
         fig, axs = plt.subplots(nrows, ncols, figsize=(4.4 * ncols, 3.2 * nrows), squeeze=False)
-        fig.suptitle(f"{env} {axis}: 30 seed return curves by cap", fontsize=14)
+        fig.suptitle(f"{env} {axis}: seed return curves by model", fontsize=14)
 
         y_min = float(sub["mean_return"].min())
         y_max = float(sub["mean_return"].max())

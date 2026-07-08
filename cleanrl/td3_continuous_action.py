@@ -3,6 +3,7 @@ import os
 import random
 import time
 from dataclasses import dataclass
+import math
 
 import gymnasium as gym
 import numpy as np
@@ -90,6 +91,14 @@ class Args:
     """deprecated compatibility alias for symmetric KL target clipping; prefer exp min/max"""
     reward_scale: float = 1.0
     """multiply training rewards before replay/updates; episode logs remain in raw env units"""
+    kl_next_state_samples: int = 1
+    """number of synthetic next-state samples in the KL exponential moment target"""
+    kl_next_obs_noise_std: float = 0.0
+    """standard deviation for synthetic next-observation samples; 0 disables the ensemble perturbation"""
+    kl_next_obs_noise_relative: bool = True
+    """scale synthetic next-observation noise by per-batch next-observation standard deviation"""
+    kl_next_obs_noise_clip: float = 3.0
+    """clip synthetic next-observation noise to this many stds; <=0 disables clipping"""
 
 
 def _needs_xml_perturbation(perturb) -> bool:
@@ -212,6 +221,35 @@ def clamp_log_moment_for_exp(log_moment: torch.Tensor, args: Args) -> torch.Tens
     return torch.clamp(log_moment, min=args.kl_log_moment_exp_min, max=args.kl_log_moment_exp_max)
 
 
+def build_kl_next_observation_samples(next_observations: torch.Tensor, args: Args) -> torch.Tensor:
+    """Build a small empirical next-state distribution around replay next observations.
+
+    The first sample is always the replay next observation. Additional samples are
+    local perturbations, giving the KL exponential moment a non-degenerate support
+    for diagnostic experiments without requiring a learned dynamics model.
+    """
+
+    num_samples = int(args.kl_next_state_samples)
+    if num_samples <= 1:
+        return next_observations.unsqueeze(1)
+
+    samples = next_observations.unsqueeze(1).repeat(1, num_samples, 1)
+    if args.kl_next_obs_noise_std <= 0:
+        return samples
+
+    if args.kl_next_obs_noise_relative:
+        scale = next_observations.detach().std(dim=0, unbiased=False).clamp_min(1e-3).view(1, 1, -1)
+    else:
+        scale = 1.0
+
+    noise = torch.randn_like(samples[:, 1:, :]) * args.kl_next_obs_noise_std * scale
+    if args.kl_next_obs_noise_clip > 0:
+        noise_limit = args.kl_next_obs_noise_clip * args.kl_next_obs_noise_std * scale
+        noise = torch.clamp(noise, min=-noise_limit, max=noise_limit)
+    samples[:, 1:, :] = samples[:, 1:, :] + noise
+    return samples
+
+
 class Actor(nn.Module):
     def __init__(self, env):
         super().__init__()
@@ -256,6 +294,10 @@ if __name__ == "__main__":
         raise ValueError("--kl-beta must be positive for --robust-target-mode kl_moment")
     if args.reward_scale <= 0:
         raise ValueError("--reward-scale must be positive")
+    if args.kl_next_state_samples < 1:
+        raise ValueError("--kl-next-state-samples must be at least 1")
+    if args.kl_next_obs_noise_std < 0:
+        raise ValueError("--kl-next-obs-noise-std must be non-negative")
     if args.kl_log_moment_target_clip is not None:
         clip = abs(float(args.kl_log_moment_target_clip))
         args.kl_log_moment_exp_min = -clip
@@ -383,11 +425,19 @@ if __name__ == "__main__":
                 )
                 if args.robust_target_mode == "kl_moment":
                     # KL mode critics output ell=log f, where implied Q=-gamma*beta*ell.
-                    # The Bellman residual is fit in f-space so this single transition
-                    # is an unbiased sample of the exponential moment.
-                    g_next_target = vf_target(data.next_observations).view(-1)
+                    # The Bellman residual is fit in f-space. With kl_next_state_samples>1,
+                    # the target estimates a local empirical exponential moment over
+                    # plausible next observations rather than a single deterministic sample.
+                    kl_next_obs_samples = build_kl_next_observation_samples(data.next_observations, args)
+                    batch_size, num_next_samples, obs_dim = kl_next_obs_samples.shape
+                    g_next_target = vf_target(kl_next_obs_samples.reshape(batch_size * num_next_samples, obs_dim)).view(
+                        batch_size, num_next_samples
+                    )
+                    done_mask = (1 - data.dones.flatten()).view(-1, 1)
+                    kl_next_log_terms = done_mask * g_next_target / args.kl_beta
+                    kl_next_log_moment = torch.logsumexp(kl_next_log_terms, dim=1) - math.log(num_next_samples)
                     kl_log_moment_target = -data.rewards.flatten() / (args.gamma * args.kl_beta)
-                    kl_log_moment_target = kl_log_moment_target + (1 - data.dones.flatten()) * g_next_target / args.kl_beta
+                    kl_log_moment_target = kl_log_moment_target + kl_next_log_moment
                     kl_log_moment_target_pre_clip = kl_log_moment_target
                     kl_log_moment_target_for_exp = clamp_log_moment_for_exp(kl_log_moment_target, args)
                     kl_moment_target = torch.exp(kl_log_moment_target_for_exp)
@@ -504,6 +554,11 @@ if __name__ == "__main__":
                     writer.add_scalar("kl/moment_target_gt_1e_minus_6_frac", (kl_moment_target > 1e-6).float().mean().item(), global_step)
                     writer.add_scalar("kl/log_moment_exp_min", args.kl_log_moment_exp_min, global_step)
                     writer.add_scalar("kl/log_moment_exp_max", args.kl_log_moment_exp_max, global_step)
+                    writer.add_scalar("kl/next_state_samples", args.kl_next_state_samples, global_step)
+                    writer.add_scalar("kl/next_obs_noise_std", args.kl_next_obs_noise_std, global_step)
+                    writer.add_scalar("kl/next_log_moment_mean", kl_next_log_moment.mean().item(), global_step)
+                    writer.add_scalar("kl/g_next_target_mean", g_next_target.mean().item(), global_step)
+                    writer.add_scalar("kl/g_next_target_std", g_next_target.std(unbiased=False).item(), global_step)
                     writer.add_scalar("kl/reward_scale", args.reward_scale, global_step)
                     writer.add_scalar("kl/scaled_reward_mean", data.rewards.mean().item(), global_step)
                     writer.add_scalar("kl/value_g_mean", vf_values.mean().item(), global_step)
