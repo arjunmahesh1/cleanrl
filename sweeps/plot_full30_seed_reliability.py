@@ -98,7 +98,12 @@ def model_sort_key(label: str) -> tuple[int, float, str]:
         frac = match.group(2) or "0"
         value = float(f"{match.group(1)}.{frac}")
         return (4, value, label)
-    return (5, math.inf, label)
+    match = re.fullmatch(r"tvc(\d+)(?:p(\d+))?", label)
+    if match:
+        frac = match.group(2) or "0"
+        value = float(f"{match.group(1)}.{frac}")
+        return (5, value, label)
+    return (6, math.inf, label)
 
 
 def display_model(label: str) -> str:
@@ -118,6 +123,11 @@ def display_model(label: str) -> str:
         frac = match.group(2)
         cap = match.group(1) if frac is None else f"{match.group(1)}.{frac}"
         return f"q={cap}"
+    match = re.fullmatch(r"tvc(\d+)(?:p(\d+))?", label)
+    if match:
+        frac = match.group(2)
+        cap = match.group(1) if frac is None else f"{match.group(1)}.{frac}"
+        return f"TV c={cap}"
     return label
 
 
@@ -166,7 +176,7 @@ def load_metrics(result_dir: Path) -> pd.DataFrame:
         parsed = df["scenario_label"].map(parse_factor_from_scenario)
         df["axis"] = parsed.map(lambda x: x[0])
         df["factor"] = parsed.map(lambda x: x[1])
-    model_pattern = r"^(a\d+p\d+|klb\d+(p\d+)?|kle\d+(p\d+)?|q\d+(p\d+)?)$"
+    model_pattern = r"^(a\d+p\d+|klb\d+(p\d+)?|kle\d+(p\d+)?|q\d+(p\d+)?|tvc\d+(p\d+)?)$"
     df = df[df["model_label"].isin(["vanilla"]) | df["model_label"].str.match(model_pattern, na=False)].copy()
     df["factor"] = df["factor"].astype(float)
     df["seed"] = df["seed"].astype(int)
