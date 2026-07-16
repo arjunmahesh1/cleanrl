@@ -70,6 +70,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Only write summary CSVs and README; skip figure generation.",
     )
+    parser.add_argument(
+        "--fixed-model-label",
+        default=None,
+        help="Preselected model for the deployment-style seed-conditioned gain panel, e.g. tvc250.",
+    )
     return parser.parse_args()
 
 
@@ -512,7 +517,121 @@ def plot_seed_scatter_and_reliability(
             )
 
 
-def write_readme(out_dir: Path, result_dir: Path, all_axes: bool, threshold_frac: float) -> None:
+def plot_seed_conditioned_effect(
+    df: pd.DataFrame,
+    out_dir: Path,
+    formats: list[str],
+    fixed_model_label: str | None,
+) -> None:
+    group_colors = {
+        "weak vanilla": "#d95f02",
+        "middle": "#7570b3",
+        "elite vanilla": "#1b9e77",
+    }
+
+    for env, env_df in df.groupby("env_id"):
+        available_axes = set(env_df["axis"].unique())
+        axes = [axis for axis in SELECTED_AXES.get(env, sorted(available_axes)) if axis in available_axes]
+        if not axes:
+            continue
+        selected = env_df[env_df["axis"].isin(axes)].copy()
+
+        axis_curve = selected.groupby(["seed", "model_label", "axis"], as_index=False)["mean_return"].mean()
+        curve_average = (
+            axis_curve.groupby(["seed", "model_label"], as_index=False)["mean_return"]
+            .mean()
+            .rename(columns={"mean_return": "curve_average"})
+        )
+        vanilla_curve = curve_average[curve_average["model_label"] == "vanilla"][["seed", "curve_average"]].rename(
+            columns={"curve_average": "vanilla_curve_average"}
+        )
+        gains = curve_average.merge(vanilla_curve, on="seed", how="inner")
+        gains["gain"] = gains["curve_average"] - gains["vanilla_curve_average"]
+
+        nominal_parts: list[pd.DataFrame] = []
+        for axis in axes:
+            nominal = nominal_factor(axis)
+            nominal_parts.append(
+                selected[
+                    (selected["axis"] == axis)
+                    & (selected["model_label"] == "vanilla")
+                    & np.isclose(selected["factor"], nominal)
+                ][["seed", "axis", "mean_return"]]
+            )
+        nominal_rows = pd.concat(nominal_parts, ignore_index=True)
+        vanilla_nominal = (
+            nominal_rows.groupby(["seed", "axis"], as_index=False)["mean_return"]
+            .mean()
+            .groupby("seed", as_index=False)["mean_return"]
+            .mean()
+            .rename(columns={"mean_return": "vanilla_nominal"})
+        )
+
+        robust = gains[gains["model_label"] != "vanilla"].copy()
+        if robust.empty:
+            continue
+        best_idx = robust.groupby("seed")["gain"].idxmax()
+        best = robust.loc[best_idx, ["seed", "model_label", "gain"]].rename(
+            columns={"model_label": "best_menu_model", "gain": "best_menu_gain"}
+        )
+
+        fixed = fixed_model_label if fixed_model_label in set(robust["model_label"]) else None
+        if fixed is None:
+            fixed = str(robust.groupby("model_label")["gain"].median().idxmax())
+        fixed_gain = robust[robust["model_label"] == fixed][["seed", "gain"]].rename(
+            columns={"gain": "fixed_gain"}
+        )
+        summary = vanilla_nominal.merge(best, on="seed", how="inner").merge(fixed_gain, on="seed", how="inner")
+
+        ranked = summary["vanilla_nominal"].rank(method="first", pct=True)
+        summary["group"] = pd.cut(
+            ranked,
+            bins=[0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0],
+            labels=["weak vanilla", "middle", "elite vanilla"],
+            include_lowest=True,
+        ).astype(str)
+
+        def correlation(ycol: str) -> float:
+            if len(summary) < 2 or summary[ycol].nunique() < 2:
+                return float("nan")
+            return float(np.corrcoef(summary["vanilla_nominal"], summary[ycol])[0, 1])
+
+        fig, axs = plt.subplots(1, 2, figsize=(15.5, 5.8), sharex=True)
+        panels = [
+            ("best_menu_gain", "Best robust cap gain\ndiagnostic: ex post over cap menu", correlation("best_menu_gain")),
+            ("fixed_gain", f"Fixed {display_model(fixed)} gain\ndeployment-style: one preselected cap", correlation("fixed_gain")),
+        ]
+        for ax, (ycol, title, corr) in zip(axs, panels):
+            for group, gsub in summary.groupby("group"):
+                ax.scatter(
+                    gsub["vanilla_nominal"],
+                    gsub[ycol],
+                    s=54,
+                    alpha=0.85,
+                    color=group_colors[group],
+                    label=group,
+                )
+            ax.axhline(0.0, color="black", linestyle="--", linewidth=1.0)
+            ax.set_title(f"{title}; r={corr:.2f}")
+            ax.set_xlabel("Vanilla nominal return, averaged over selected axes")
+            ax.set_ylabel("Robust minus vanilla curve-average return")
+            ax.grid(alpha=0.22)
+        axs[0].legend(frameon=False)
+        fig.suptitle(f"{env}: seed-conditioned effect of robust target clipping", fontsize=15)
+        fig.tight_layout()
+
+        result_dir = out_dir / "seed_conditioned_effect" / env
+        save_figure(fig, result_dir / "vanilla_nominal_vs_robust_gain", formats)
+        summary.to_csv(result_dir / "vanilla_nominal_vs_robust_gain_summary.csv", index=False)
+
+
+def write_readme(
+    out_dir: Path,
+    result_dir: Path,
+    all_axes: bool,
+    threshold_frac: float,
+    fixed_model_label: str | None,
+) -> None:
     lines = [
         "# Full 30-Seed Seed-Level Analysis Plots",
         "",
@@ -523,6 +642,7 @@ def write_readme(out_dir: Path, result_dir: Path, all_axes: bool, threshold_frac
         "- `fixed_seed_all_caps/`: one figure per environment/seed. Each panel is a selected perturbation axis, with all caps shown together.",
         "- `seed_scatter/`: one-point-per-seed scatter plots at a stress factor, both raw return and same-seed vanilla-subtracted return.",
         "- `reliability_curves/`: reliability survival curves, `P(return >= threshold)`, where threshold is normalized by vanilla nominal median return.",
+        "- `seed_conditioned_effect/`: vanilla nominal quality versus robust curve-average gain, shown both ex post over the cap menu and for one preselected cap.",
         "- `stress_scenario_summary.csv`: model-level stress-factor summary with reliability/failure/win-rate statistics.",
         "- `best_caps_by_axis.csv`: best cap by median stress-factor return for each axis.",
         "- `best_caps_by_reliability_auc.csv`: best cap by area under the reliability curve between 0 and 1x vanilla nominal median return.",
@@ -530,6 +650,7 @@ def write_readme(out_dir: Path, result_dir: Path, all_axes: bool, threshold_frac
         "",
         f"Default catastrophe threshold fraction: `{threshold_frac}`.",
         f"Scatter/reliability axis mode: `{'all axes' if all_axes else 'selected high-signal axes'}`.",
+        f"Requested fixed model for seed-conditioned analysis: `{fixed_model_label or 'auto'}`.",
         "",
         "ClipFraction note:",
         "`robust/tv_return_clip_fraction` is logged during training, not evaluation. These eval CSVs are enough for reliability and seed-return analyses, but ClipFraction trajectory/scatter plots require the training TensorBoard event files or exported W&B scalars.",
@@ -560,7 +681,14 @@ def main() -> None:
             args.formats,
             args.all_scatter_axes,
         )
-    write_readme(out_dir, result_dir, args.all_scatter_axes, args.catastrophe_threshold_frac)
+        plot_seed_conditioned_effect(df, out_dir, args.formats, args.fixed_model_label)
+    write_readme(
+        out_dir,
+        result_dir,
+        args.all_scatter_axes,
+        args.catastrophe_threshold_frac,
+        args.fixed_model_label,
+    )
     print(f"wrote {out_dir}")
     print(f"rows: {len(df)}")
     print(f"envs: {sorted(df['env_id'].unique())}")

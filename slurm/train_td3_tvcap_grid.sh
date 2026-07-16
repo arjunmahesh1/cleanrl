@@ -96,6 +96,14 @@ export PYTHONHASHSEED="${seed}"
 export CUBLAS_WORKSPACE_CONFIG="${CUBLAS_WORKSPACE_CONFIG:-:4096:8}"
 export PYTHONPATH="${ROOT}:${PYTHONPATH:-}"
 
+# W&B run caches can be hundreds of MB per long TD3 run. Keep them off the
+# quota-limited home filesystem; online tracking still syncs normally.
+if [[ "${TRACK}" == "true" ]]; then
+    WANDB_LOCAL_ROOT="${WANDB_LOCAL_ROOT:-${SLURM_TMPDIR:-/tmp}/${USER}/wandb}"
+    mkdir -p "${WANDB_LOCAL_ROOT}"
+    export WANDB_DIR="${WANDB_DIR:-${WANDB_LOCAL_ROOT}}"
+fi
+
 mkdir -p "${RUN_DIR}"
 cd "${ROOT}"
 

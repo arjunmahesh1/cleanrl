@@ -1,6 +1,7 @@
 from typing import Callable
 
 import gymnasium as gym
+import numpy as np
 import torch
 import torch.nn as nn
 
@@ -32,21 +33,25 @@ def evaluate(
 
     obs, _ = envs.reset()
     episodic_returns = []
+    running_returns = np.zeros(envs.num_envs, dtype=np.float64)
     while len(episodic_returns) < eval_episodes:
         with torch.no_grad():
             actions = actor(torch.Tensor(obs).to(device))
             actions += torch.normal(0, actor.action_scale * exploration_noise)
             actions = actions.cpu().numpy().clip(envs.single_action_space.low, envs.single_action_space.high)
 
-        next_obs, _, _, _, infos = envs.step(actions)
-        if "final_info" in infos:
-            for info in infos["final_info"]:
-                if "episode" not in info:
-                    continue
-                print(f"eval_episode={len(episodic_returns)}, episodic_return={info['episode']['r']}")
-                episodic_returns += [info["episode"]["r"]]
+        next_obs, rewards, terminations, truncations, _ = envs.step(actions)
+        running_returns += rewards
+        for env_idx in np.flatnonzero(np.logical_or(terminations, truncations)):
+            episodic_return = float(running_returns[env_idx])
+            print(f"eval_episode={len(episodic_returns)}, episodic_return={episodic_return}")
+            episodic_returns.append(episodic_return)
+            running_returns[env_idx] = 0.0
+            if len(episodic_returns) >= eval_episodes:
+                break
         obs = next_obs
 
+    envs.close()
     return episodic_returns
 
 
