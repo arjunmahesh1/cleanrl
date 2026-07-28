@@ -1,0 +1,4 @@
+env_id,axis,stress_factor,best_model_by_median_return,best_median_return,vanilla_median_return,best_minus_vanilla_median
+Walker2d-v4,action_replace,0.5,kle100,287.80064148878307,179.7766380272207,108.02400346156236
+Walker2d-v4,actuator_gain,0.5,kle100,388.2878221303524,365.6335020462299,22.654320084122503
+Walker2d-v4,mass,0.5,vanilla,1264.4474370715116,1264.4474370715116,0.0

@@ -1,3 +1,5 @@
+AGENTS.md
+PROJECT_STATUS.md
 slurm-*.out
 .claude/
 cluster_rl_runs/
@@ -10,6 +12,13 @@ friction_0p5_2p0_bundle_*/
 sweeps_backup_*/
 sweeps/ppo_robust_summary.recomputed.csv
 sweeps/metrics/seed_*.csv
+sweeps/results/PPO_full30_allcaps_no_noop_20260524.zip
+sweeps/results/PPO_full30_allcaps_no_noop_20260524.tgz
+sweeps/results/PPO_full30_allcaps_no_noop_20260524/**/*.csv
+sweeps/results/PPO_full30_allcaps_no_noop_20260524/manifests/
+sweeps/results/PPO_full30_allcaps_no_noop_20260524/raw_metrics/
+sweeps/results/PPO_full30_allcaps_no_noop_20260524/**/raw_metrics/
+sweeps/results/PPO_full30_allcaps_no_noop_20260524/**/outputs/
 sweeps/results/PPO_Friction_rawreward_5seed_20260224/best_cap_200k.txt
 sweeps/results/PPO_Friction_rawreward_5seed_20260224/ppo_robust_eval_metrics.csv
 sweeps/results/PPO_Friction_rawreward_5seed_20260224/ppo_robust_gain_all_stats.csv
@@ -128,6 +137,7 @@ celerybeat-schedule
 # Environments
 .env
 .venv
+.venv-v5
 env/
 venv/
 ENV/

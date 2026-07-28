@@ -1,8 +1,16 @@
 from typing import Callable
 
 import gymnasium as gym
+import numpy as np
 import torch
 import torch.nn as nn
+
+
+def _make_sync_vector_env(env_fn):
+    autoreset_mode = getattr(gym.vector, "AutoresetMode", None)
+    if autoreset_mode is None:
+        return gym.vector.SyncVectorEnv([env_fn])
+    return gym.vector.SyncVectorEnv([env_fn], autoreset_mode=autoreset_mode.SAME_STEP)
 
 
 def evaluate(
@@ -16,11 +24,12 @@ def evaluate(
     capture_video: bool = True,
     exploration_noise: float = 0.1,
 ):
-    envs = gym.vector.SyncVectorEnv([make_env(env_id, 0, 0, capture_video, run_name)])
+    envs = _make_sync_vector_env(make_env(env_id, 0, 0, capture_video, run_name))
     actor = Model[0](envs).to(device)
     qf1 = Model[1](envs).to(device)
     qf2 = Model[1](envs).to(device)
-    actor_params, qf1_params, qf2_params = torch.load(model_path, map_location=device)
+    checkpoint = torch.load(model_path, map_location=device)
+    actor_params, qf1_params, qf2_params = checkpoint[:3]
     actor.load_state_dict(actor_params)
     actor.eval()
     qf1.load_state_dict(qf1_params)
@@ -31,21 +40,25 @@ def evaluate(
 
     obs, _ = envs.reset()
     episodic_returns = []
+    running_returns = np.zeros(envs.num_envs, dtype=np.float64)
     while len(episodic_returns) < eval_episodes:
         with torch.no_grad():
             actions = actor(torch.Tensor(obs).to(device))
             actions += torch.normal(0, actor.action_scale * exploration_noise)
             actions = actions.cpu().numpy().clip(envs.single_action_space.low, envs.single_action_space.high)
 
-        next_obs, _, _, _, infos = envs.step(actions)
-        if "final_info" in infos:
-            for info in infos["final_info"]:
-                if "episode" not in info:
-                    continue
-                print(f"eval_episode={len(episodic_returns)}, episodic_return={info['episode']['r']}")
-                episodic_returns += [info["episode"]["r"]]
+        next_obs, rewards, terminations, truncations, _ = envs.step(actions)
+        running_returns += rewards
+        for env_idx in np.flatnonzero(np.logical_or(terminations, truncations)):
+            episodic_return = float(running_returns[env_idx])
+            print(f"eval_episode={len(episodic_returns)}, episodic_return={episodic_return}")
+            episodic_returns.append(episodic_return)
+            running_returns[env_idx] = 0.0
+            if len(episodic_returns) >= eval_episodes:
+                break
         obs = next_obs
 
+    envs.close()
     return episodic_returns
 
 

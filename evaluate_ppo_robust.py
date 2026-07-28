@@ -13,6 +13,9 @@ from cleanrl.ppo import Agent as PPOAgent
 from cleanrl.ppo import make_env as make_ppo_env
 from cleanrl.ppo_continuous_action import Agent as PPOContinuousAgent
 from cleanrl.ppo_continuous_action import make_env as make_ppo_continuous_env
+from cleanrl.td3_continuous_action import Actor as TD3Actor
+from cleanrl.td3_continuous_action import QNetwork as TD3QNetwork
+from cleanrl.td3_continuous_action import make_env as make_td3_env
 
 
 def interquartile_mean(x: np.ndarray) -> float:
@@ -269,9 +272,40 @@ def evaluate_continuous(args: argparse.Namespace):
     return episodic_returns
 
 
+def evaluate_td3(args: argparse.Namespace):
+    perturb = build_perturbation_args(args)
+    run_name = args.run_name or _default_eval_run_name(args)
+    envs = gym.vector.SyncVectorEnv(
+        [make_td3_env(args.env_id, args.seed, 0, args.capture_video, run_name, perturb)]
+    )
+    device = torch.device(args.device)
+    actor = TD3Actor(envs).to(device)
+    qf1 = TD3QNetwork(envs).to(device)
+    qf2 = TD3QNetwork(envs).to(device)
+    checkpoint = torch.load(args.model_path, map_location=device)
+    actor_params, qf1_params, qf2_params = checkpoint[:3]
+    actor.load_state_dict(actor_params)
+    qf1.load_state_dict(qf1_params)
+    qf2.load_state_dict(qf2_params)
+    actor.eval()
+    qf1.eval()
+    qf2.eval()
+
+    def action_fn(obs):
+        with torch.no_grad():
+            actions = actor(torch.Tensor(obs).to(device))
+        return actions.cpu().numpy().clip(envs.single_action_space.low, envs.single_action_space.high)
+
+    episodic_returns = evaluate_with_hard_cap(
+        envs, action_fn, args.eval_episodes, args.max_episode_steps, args.seed
+    )
+    envs.close()
+    return episodic_returns
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Evaluate trained PPO checkpoints under nominal or perturbed environments.")
-    parser.add_argument("--algo", choices=["ppo", "ppo_cont"], required=True)
+    parser = argparse.ArgumentParser(description="Evaluate trained checkpoints under nominal or perturbed environments.")
+    parser.add_argument("--algo", choices=["ppo", "ppo_cont", "td3"], required=True)
     parser.add_argument("--model-path", required=True)
     parser.add_argument("--env-id", required=True)
     parser.add_argument("--eval-episodes", type=int, default=20)
@@ -341,8 +375,10 @@ def main():
 
     if args.algo == "ppo":
         episodic_returns = evaluate_discrete(args)
-    else:
+    elif args.algo == "ppo_cont":
         episodic_returns = evaluate_continuous(args)
+    else:
+        episodic_returns = evaluate_td3(args)
 
     returns = np.array(episodic_returns, dtype=np.float64)
     mean_return = returns.mean()
