@@ -37,6 +37,8 @@ except ImportError:
 
 __all__ = [
     "BaseBuffer",
+    "PhysicalEnsembleReplayBuffer",
+    "PhysicalEnsembleReplayBufferSamples",
     "RolloutBuffer",
     "ReplayBuffer",
     "RolloutBufferSamples",
@@ -59,6 +61,17 @@ class ReplayBufferSamples(NamedTuple):
     next_observations: th.Tensor
     dones: th.Tensor
     rewards: th.Tensor
+
+
+class PhysicalEnsembleReplayBufferSamples(NamedTuple):
+    observations: th.Tensor
+    actions: th.Tensor
+    next_observations: th.Tensor
+    dones: th.Tensor
+    rewards: th.Tensor
+    ensemble_next_observations: th.Tensor
+    ensemble_dones: th.Tensor
+    ensemble_rewards: th.Tensor
 
 
 def get_action_dim(action_space: spaces.Space) -> int:
@@ -428,6 +441,91 @@ class ReplayBuffer(BaseBuffer):
         if dtype == np.float64:
             return np.float32
         return dtype
+
+
+class PhysicalEnsembleReplayBuffer(ReplayBuffer):
+    """Replay buffer with aligned one-step outcomes from a finite dynamics ensemble."""
+
+    def __init__(
+        self,
+        buffer_size: int,
+        observation_space: spaces.Space,
+        action_space: spaces.Space,
+        device: th.device | str,
+        *,
+        num_dynamics: int,
+        n_envs: int = 1,
+        handle_timeout_termination: bool = False,
+    ):
+        if num_dynamics < 1:
+            raise ValueError("num_dynamics must be at least 1")
+        super().__init__(
+            buffer_size,
+            observation_space,
+            action_space,
+            device,
+            n_envs=n_envs,
+            optimize_memory_usage=False,
+            handle_timeout_termination=handle_timeout_termination,
+        )
+        self.num_dynamics = int(num_dynamics)
+        self.ensemble_next_observations = np.zeros(
+            (self.buffer_size, self.n_envs, self.num_dynamics, *self.obs_shape),
+            dtype=observation_space.dtype,
+        )
+        self.ensemble_rewards = np.zeros(
+            (self.buffer_size, self.n_envs, self.num_dynamics),
+            dtype=np.float32,
+        )
+        self.ensemble_dones = np.zeros(
+            (self.buffer_size, self.n_envs, self.num_dynamics),
+            dtype=np.float32,
+        )
+
+    def add(
+        self,
+        obs: np.ndarray,
+        next_obs: np.ndarray,
+        action: np.ndarray,
+        reward: np.ndarray,
+        done: np.ndarray,
+        infos: list[dict[str, Any]],
+        *,
+        ensemble_next_observations: np.ndarray,
+        ensemble_rewards: np.ndarray,
+        ensemble_dones: np.ndarray,
+    ) -> None:
+        expected_obs_shape = (self.n_envs, self.num_dynamics, *self.obs_shape)
+        expected_scalar_shape = (self.n_envs, self.num_dynamics)
+        if ensemble_next_observations.shape != expected_obs_shape:
+            raise ValueError(
+                "ensemble_next_observations has shape "
+                f"{ensemble_next_observations.shape}, expected {expected_obs_shape}"
+            )
+        if ensemble_rewards.shape != expected_scalar_shape:
+            raise ValueError(f"ensemble_rewards has shape {ensemble_rewards.shape}, expected {expected_scalar_shape}")
+        if ensemble_dones.shape != expected_scalar_shape:
+            raise ValueError(f"ensemble_dones has shape {ensemble_dones.shape}, expected {expected_scalar_shape}")
+
+        write_pos = self.pos
+        self.ensemble_next_observations[write_pos] = np.asarray(ensemble_next_observations)
+        self.ensemble_rewards[write_pos] = np.asarray(ensemble_rewards)
+        self.ensemble_dones[write_pos] = np.asarray(ensemble_dones)
+        super().add(obs, next_obs, action, reward, done, infos)
+
+    def _get_samples(self, batch_inds: np.ndarray) -> PhysicalEnsembleReplayBufferSamples:
+        env_indices = np.random.randint(0, high=self.n_envs, size=(len(batch_inds),))
+        data = (
+            self.observations[batch_inds, env_indices, :],
+            self.actions[batch_inds, env_indices, :],
+            self.next_observations[batch_inds, env_indices, :],
+            (self.dones[batch_inds, env_indices] * (1 - self.timeouts[batch_inds, env_indices])).reshape(-1, 1),
+            self.rewards[batch_inds, env_indices].reshape(-1, 1),
+            self.ensemble_next_observations[batch_inds, env_indices, :],
+            self.ensemble_dones[batch_inds, env_indices, :],
+            self.ensemble_rewards[batch_inds, env_indices, :],
+        )
+        return PhysicalEnsembleReplayBufferSamples(*tuple(map(self.to_torch, data)))
 
 
 class RolloutBuffer(BaseBuffer):

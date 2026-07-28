@@ -1,4 +1,5 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/td3/#td3_continuous_actionpy
+import copy
 import os
 import random
 import time
@@ -14,7 +15,7 @@ import torch.optim as optim
 import tyro
 from torch.utils.tensorboard import SummaryWriter
 
-from cleanrl_utils.buffers import ReplayBuffer
+from cleanrl_utils.buffers import PhysicalEnsembleReplayBuffer, ReplayBuffer
 from cleanrl_utils.mujoco_xml_utils import make_mujoco_env
 from cleanrl_utils.perturbation_config import apply_env_perturbations
 
@@ -76,7 +77,7 @@ class Args:
     noise_clip: float = 0.5
     """noise clip parameter of the Target Policy Smoothing Regularization"""
     robust_target_mode: str = "none"
-    """robust critic target mode: none, tv_cap, kl_moment"""
+    """robust critic target mode: none, tv_cap, kl_moment, kl_physical, kl_physical_radius"""
     tv_clip_q_targets: bool = False
     """if true, apply an upper cap to the bootstrapped TD3 target Q value"""
     tv_fixed_cap: float | None = None
@@ -89,6 +90,8 @@ class Args:
     """maximum KL log-moment value before exponentiating in the moment loss"""
     kl_log_moment_target_clip: float | None = None
     """deprecated compatibility alias for symmetric KL target clipping; prefer exp min/max"""
+    kl_rescale_moment_loss: bool = True
+    """multiply KL moment MSE by (gamma * beta)^2 to restore its local Q-error scale"""
     reward_scale: float = 1.0
     """multiply training rewards before replay/updates; episode logs remain in raw env units"""
     kl_next_state_samples: int = 1
@@ -99,6 +102,18 @@ class Args:
     """scale synthetic next-observation noise by per-batch next-observation standard deviation"""
     kl_next_obs_noise_clip: float = 3.0
     """clip synthetic next-observation noise to this many stds; <=0 disables clipping"""
+    kl_physical_dynamics: str = "nominal"
+    """comma-separated finite dynamics support, e.g. nominal,mass:0.8,mass:1.2,actuator_gain:0.8"""
+    kl_physical_weights: str = ""
+    """optional comma-separated reference probabilities; empty means uniform"""
+    kl_physical_verify_nominal: bool = True
+    """verify that a nominal branch reproduces each live MuJoCo transition"""
+    kl_physical_verify_tolerance: float = 1e-5
+    """maximum observation/reward discrepancy allowed by nominal branch verification"""
+    kl_radius: float = 0.1
+    """fixed KL radius for kl_physical_radius"""
+    kl_radius_bisection_steps: int = 40
+    """dual-temperature bisection steps for the constrained physical KL target"""
 
 
 def _needs_xml_perturbation(perturb) -> bool:
@@ -184,6 +199,161 @@ def make_env(env_id, seed, idx, capture_video, run_name, perturb=None, reward_sc
     return thunk
 
 
+def make_sync_vector_env(env_fns):
+    """Use same-step autoreset on modern Gymnasium while retaining 0.29 compatibility."""
+    autoreset_mode = getattr(gym.vector, "AutoresetMode", None)
+    if autoreset_mode is None:
+        return gym.vector.SyncVectorEnv(env_fns)
+    return gym.vector.SyncVectorEnv(env_fns, autoreset_mode=autoreset_mode.SAME_STEP)
+
+
+def extract_episode_statistics(infos: dict) -> list[tuple[float, int]]:
+    """Normalize Gymnasium 0.29 and 1.x vector episode-info layouts."""
+
+    def unpack_episode(episode: dict, mask=None) -> list[tuple[float, int]]:
+        rewards = np.asarray(episode["r"]).reshape(-1)
+        lengths = np.asarray(episode["l"]).reshape(-1)
+        if mask is None:
+            mask = episode.get("_r")
+        mask_array = (
+            np.ones(rewards.shape, dtype=bool)
+            if mask is None
+            else np.asarray(mask, dtype=bool).reshape(-1)
+        )
+        return [
+            (float(rewards[index]), int(lengths[index]))
+            for index in range(min(len(rewards), len(lengths), len(mask_array)))
+            if mask_array[index]
+        ]
+
+    final_infos = infos.get("final_info")
+    if isinstance(final_infos, dict):
+        episode = final_infos.get("episode")
+        if episode is not None:
+            return unpack_episode(episode, final_infos.get("_episode"))
+    elif final_infos is not None:
+        completed = []
+        for info in final_infos:
+            if info is not None and "episode" in info:
+                completed.extend(unpack_episode(info["episode"]))
+        if completed:
+            return completed
+
+    episode = infos.get("episode")
+    if episode is not None:
+        return unpack_episode(episode, infos.get("_episode"))
+    return []
+
+
+def final_observations_from_infos(infos: dict):
+    """Return terminal observations and validity mask across Gymnasium versions."""
+    for key in ("final_observation", "final_obs"):
+        observations = infos.get(key)
+        if observations is not None:
+            mask = infos.get(f"_{key}")
+            if mask is None:
+                mask = np.ones(len(observations), dtype=bool)
+            return observations, np.asarray(mask, dtype=bool)
+    return None, None
+
+
+def parse_physical_dynamics_spec(spec: str):
+    """Parse a finite MuJoCo dynamics support for KL-regularized targets."""
+    members = []
+    for raw_token in spec.split(","):
+        token = raw_token.strip()
+        if not token:
+            continue
+        if token == "nominal":
+            members.append(("nominal", {}))
+            continue
+        if ":" not in token:
+            raise ValueError(
+                f"invalid KL physical dynamics token {token!r}; expected nominal or kind:factor"
+            )
+        kind, raw_factor = token.split(":", 1)
+        factor = float(raw_factor)
+        if factor <= 0:
+            raise ValueError(f"KL physical dynamics factors must be positive, got {token!r}")
+        argument_by_kind = {
+            "mass": "total_mass_scale",
+            "friction": "geom_friction_scale",
+            "damping": "joint_damping_scale",
+            "actuator_gain": "actuator_gain_scale",
+        }
+        if kind not in argument_by_kind:
+            raise ValueError(
+                f"unsupported KL physical dynamics kind {kind!r}; "
+                f"choose from {sorted(argument_by_kind)}"
+            )
+        members.append((f"{kind}:{factor:g}", {argument_by_kind[kind]: factor}))
+    if not members:
+        raise ValueError("--kl-physical-dynamics must contain at least one member")
+    return members
+
+
+def parse_physical_dynamics_weights(raw_weights: str, num_dynamics: int) -> np.ndarray:
+    if raw_weights.strip():
+        weights = np.asarray([float(value.strip()) for value in raw_weights.split(",")], dtype=np.float64)
+        if len(weights) != num_dynamics:
+            raise ValueError(
+                f"--kl-physical-weights contains {len(weights)} values for {num_dynamics} dynamics members"
+            )
+        if np.any(weights <= 0):
+            raise ValueError("--kl-physical-weights must all be strictly positive")
+        weights = weights / weights.sum()
+    else:
+        weights = np.full(num_dynamics, 1.0 / num_dynamics, dtype=np.float64)
+    return weights
+
+
+def make_physical_dynamics_ensemble(args: Args, run_path: str):
+    members = parse_physical_dynamics_spec(args.kl_physical_dynamics)
+    weights = parse_physical_dynamics_weights(args.kl_physical_weights, len(members))
+    ensemble = []
+    xml_dir = os.path.join(run_path, "kl_physical_xml")
+    for index, (label, xml_kwargs) in enumerate(members):
+        if label == "nominal":
+            env = gym.make(args.env_id)
+        else:
+            safe_label = label.replace(":", "_").replace(".", "p")
+            env = make_mujoco_env(
+                args.env_id,
+                xml_out_dir=xml_dir,
+                run_name=f"{safe_label}_{index}",
+                **xml_kwargs,
+            )
+        env.reset(seed=args.seed + 10_000 + index)
+        ensemble.append(env)
+    return ensemble, [label for label, _ in members], weights
+
+
+def step_physical_dynamics_ensemble(envs, ensemble, actions: np.ndarray, reward_scale: float):
+    """Branch one live MuJoCo state through every fixed dynamics member."""
+    if envs.num_envs != 1:
+        raise ValueError("KL physical dynamics currently requires --num-envs 1")
+    source = envs.envs[0].unwrapped
+    qpos = source.data.qpos.copy()
+    qvel = source.data.qvel.copy()
+    source_time = float(source.data.time)
+    next_observations = []
+    rewards = []
+    dones = []
+    for candidate in ensemble:
+        target = candidate.unwrapped
+        target.set_state(qpos, qvel)
+        target.data.time = source_time
+        next_obs, reward, terminated, _, _ = target.step(actions[0])
+        next_observations.append(np.asarray(next_obs))
+        rewards.append(float(reward) * reward_scale)
+        dones.append(float(terminated))
+    return (
+        np.asarray(next_observations)[None, ...],
+        np.asarray(rewards, dtype=np.float32)[None, ...],
+        np.asarray(dones, dtype=np.float32)[None, ...],
+    )
+
+
 # ALGO LOGIC: initialize agent here:
 class QNetwork(nn.Module):
     def __init__(self, env):
@@ -219,6 +389,108 @@ class ValueNetwork(nn.Module):
 
 def clamp_log_moment_for_exp(log_moment: torch.Tensor, args: Args) -> torch.Tensor:
     return torch.clamp(log_moment, min=args.kl_log_moment_exp_min, max=args.kl_log_moment_exp_max)
+
+
+def kl_regularized_discrete_target(
+    joint_returns: torch.Tensor,
+    beta: float,
+    log_reference_weights: torch.Tensor,
+):
+    """Return the finite-support KL value and its optimal adversarial weights."""
+    if joint_returns.shape[1] == 1:
+        return joint_returns[:, 0], torch.ones_like(joint_returns)
+    reference_weights = torch.exp(log_reference_weights)
+    reference_target = torch.sum(reference_weights * joint_returns, dim=1, keepdim=True)
+    centered_returns = joint_returns - reference_target
+    adversarial_logits = log_reference_weights - centered_returns / beta
+    adversarial_weights = torch.softmax(adversarial_logits, dim=1)
+    robust_target = reference_target.view(-1) - beta * torch.logsumexp(adversarial_logits, dim=1)
+    return robust_target, adversarial_weights
+
+
+def kl_constrained_discrete_target(
+    joint_returns: torch.Tensor,
+    radius: float,
+    log_reference_weights: torch.Tensor,
+    bisection_steps: int,
+):
+    """Solve the finite-support KL-ball inner problem for every batch row."""
+    batch_size, num_dynamics = joint_returns.shape
+    reference_weights = torch.exp(log_reference_weights).expand(batch_size, num_dynamics)
+    if num_dynamics == 1:
+        zeros = torch.zeros(batch_size, dtype=joint_returns.dtype, device=joint_returns.device)
+        return joint_returns[:, 0], torch.ones_like(joint_returns), zeros, zeros
+    if radius == 0:
+        target = torch.sum(reference_weights * joint_returns, dim=1)
+        zeros = torch.zeros(batch_size, dtype=joint_returns.dtype, device=joint_returns.device)
+        return target, reference_weights, torch.full_like(zeros, float("inf")), zeros
+
+    minimum_returns = torch.min(joint_returns, dim=1, keepdim=True).values
+    worst_mask = torch.isclose(
+        joint_returns,
+        minimum_returns,
+        rtol=1e-6,
+        atol=1e-7,
+    )
+    worst_reference_weights = reference_weights * worst_mask
+    worst_reference_mass = worst_reference_weights.sum(dim=1).clamp_min(1e-12)
+    maximum_useful_radius = -torch.log(worst_reference_mass)
+    value_range = torch.max(joint_returns, dim=1).values - torch.min(joint_returns, dim=1).values
+    saturated = radius >= maximum_useful_radius
+    indistinguishable = value_range <= 1e-8
+
+    scale = value_range.clamp_min(1e-6)
+    beta_low = scale * 1e-7
+    beta_high = scale * 1e7
+    centered_returns = joint_returns - torch.sum(
+        reference_weights * joint_returns,
+        dim=1,
+        keepdim=True,
+    )
+
+    for _ in range(bisection_steps):
+        beta_mid = torch.sqrt(beta_low * beta_high)
+        logits = log_reference_weights - centered_returns / beta_mid.unsqueeze(1)
+        weights_mid = torch.softmax(logits, dim=1)
+        kl_mid = torch.sum(
+            weights_mid
+            * (torch.log(weights_mid.clamp_min(1e-12)) - log_reference_weights),
+            dim=1,
+        )
+        beta_low = torch.where(kl_mid > radius, beta_mid, beta_low)
+        beta_high = torch.where(kl_mid > radius, beta_high, beta_mid)
+
+    effective_beta = beta_high
+    adversarial_logits = log_reference_weights - centered_returns / effective_beta.unsqueeze(1)
+    adversarial_weights = torch.softmax(adversarial_logits, dim=1)
+
+    # Among tied minimizers, this is the minimum-KL distribution that attains
+    # the worst value. It avoids reporting a fictitious extra radius for a
+    # one-hot choice when several support members have the same return.
+    worst_weights = worst_reference_weights / worst_reference_mass.unsqueeze(1)
+    adversarial_weights = torch.where(
+        saturated.unsqueeze(1),
+        worst_weights,
+        adversarial_weights,
+    )
+    adversarial_weights = torch.where(
+        indistinguishable.unsqueeze(1),
+        reference_weights,
+        adversarial_weights,
+    )
+    effective_beta = torch.where(saturated, torch.zeros_like(effective_beta), effective_beta)
+    effective_beta = torch.where(
+        indistinguishable,
+        torch.full_like(effective_beta, float("inf")),
+        effective_beta,
+    )
+    achieved_radius = torch.sum(
+        adversarial_weights
+        * (torch.log(adversarial_weights.clamp_min(1e-12)) - log_reference_weights),
+        dim=1,
+    )
+    robust_target = torch.sum(adversarial_weights * joint_returns, dim=1)
+    return robust_target, adversarial_weights, effective_beta, achieved_radius
 
 
 def build_kl_next_observation_samples(next_observations: torch.Tensor, args: Args) -> torch.Tensor:
@@ -284,14 +556,23 @@ if __name__ == "__main__":
     args = tyro.cli(Args)
     if args.tv_clip_q_targets and args.robust_target_mode == "none":
         args.robust_target_mode = "tv_cap"
-    if args.robust_target_mode not in {"none", "tv_cap", "kl_moment"}:
-        raise ValueError("--robust-target-mode must be one of: none, tv_cap, kl_moment")
+    if args.robust_target_mode not in {
+        "none",
+        "tv_cap",
+        "kl_moment",
+        "kl_physical",
+        "kl_physical_radius",
+    }:
+        raise ValueError(
+            "--robust-target-mode must be one of: "
+            "none, tv_cap, kl_moment, kl_physical, kl_physical_radius"
+        )
     if args.robust_target_mode == "tv_cap" and args.tv_fixed_cap is None:
         raise ValueError("--tv-fixed-cap is required when --robust-target-mode tv_cap")
     if args.robust_target_mode != "tv_cap" and args.tv_clip_q_targets:
         raise ValueError("--tv-clip-q-targets is only valid with --robust-target-mode tv_cap")
-    if args.robust_target_mode == "kl_moment" and args.kl_beta <= 0:
-        raise ValueError("--kl-beta must be positive for --robust-target-mode kl_moment")
+    if args.robust_target_mode in {"kl_moment", "kl_physical"} and args.kl_beta <= 0:
+        raise ValueError("--kl-beta must be positive for KL robust target modes")
     if args.reward_scale <= 0:
         raise ValueError("--reward-scale must be positive")
     if args.kl_next_state_samples < 1:
@@ -304,6 +585,14 @@ if __name__ == "__main__":
         args.kl_log_moment_exp_max = min(clip, args.kl_log_moment_exp_max)
     if args.robust_target_mode == "kl_moment" and args.kl_log_moment_exp_min >= args.kl_log_moment_exp_max:
         raise ValueError("--kl-log-moment-exp-min must be smaller than --kl-log-moment-exp-max")
+    if args.robust_target_mode in {"kl_physical", "kl_physical_radius"} and args.num_envs != 1:
+        raise ValueError("physical KL robust target modes currently require --num-envs 1")
+    if args.kl_physical_verify_tolerance <= 0:
+        raise ValueError("--kl-physical-verify-tolerance must be positive")
+    if args.kl_radius < 0:
+        raise ValueError("--kl-radius must be non-negative")
+    if args.kl_radius_bisection_steps < 1:
+        raise ValueError("--kl-radius-bisection-steps must be at least 1")
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     run_path = os.path.join(args.run_dir, run_name)
     if args.track:
@@ -334,7 +623,7 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
     # env setup
-    envs = gym.vector.SyncVectorEnv(
+    envs = make_sync_vector_env(
         [
             make_env(
                 args.env_id,
@@ -348,6 +637,26 @@ if __name__ == "__main__":
         ]
     )
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
+    physical_dynamics_ensemble = []
+    physical_dynamics_labels = []
+    physical_dynamics_weights = None
+    physical_dynamics_weights_tensor = None
+    physical_log_weights = None
+    if args.robust_target_mode in {"kl_physical", "kl_physical_radius"}:
+        physical_dynamics_ensemble, physical_dynamics_labels, physical_dynamics_weights = (
+            make_physical_dynamics_ensemble(args, run_path)
+        )
+        physical_dynamics_weights_tensor = torch.as_tensor(
+            physical_dynamics_weights,
+            dtype=torch.float32,
+            device=device,
+        )
+        physical_log_weights = torch.log(physical_dynamics_weights_tensor)
+        writer.add_text("kl_physical/dynamics_labels", ", ".join(physical_dynamics_labels))
+        writer.add_text(
+            "kl_physical/dynamics_weights",
+            ", ".join(f"{weight:.8g}" for weight in physical_dynamics_weights),
+        )
 
     actor = Actor(envs).to(device)
     qf1 = QNetwork(envs).to(device)
@@ -366,15 +675,27 @@ if __name__ == "__main__":
     vf_optimizer = optim.Adam(vf.parameters(), lr=args.learning_rate) if vf is not None else None
     actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.learning_rate)
 
-    envs.single_observation_space.dtype = np.float32
-    rb = ReplayBuffer(
-        args.buffer_size,
-        envs.single_observation_space,
-        envs.single_action_space,
-        device,
-        n_envs=args.num_envs,
-        handle_timeout_termination=False,
-    )
+    replay_observation_space = copy.deepcopy(envs.single_observation_space)
+    replay_observation_space.dtype = np.float32
+    if args.robust_target_mode in {"kl_physical", "kl_physical_radius"}:
+        rb = PhysicalEnsembleReplayBuffer(
+            args.buffer_size,
+            replay_observation_space,
+            envs.single_action_space,
+            device,
+            num_dynamics=len(physical_dynamics_ensemble),
+            n_envs=args.num_envs,
+            handle_timeout_termination=False,
+        )
+    else:
+        rb = ReplayBuffer(
+            args.buffer_size,
+            replay_observation_space,
+            envs.single_action_space,
+            device,
+            n_envs=args.num_envs,
+            handle_timeout_termination=False,
+        )
     start_time = time.time()
 
     # TRY NOT TO MODIFY: start the game
@@ -389,25 +710,69 @@ if __name__ == "__main__":
                 actions += torch.normal(0, actor.action_scale * args.exploration_noise)
                 actions = actions.cpu().numpy().clip(envs.single_action_space.low, envs.single_action_space.high)
 
+        physical_outcomes = None
+        if args.robust_target_mode in {"kl_physical", "kl_physical_radius"}:
+            physical_outcomes = step_physical_dynamics_ensemble(
+                envs,
+                physical_dynamics_ensemble,
+                actions,
+                args.reward_scale,
+            )
+
         # TRY NOT TO MODIFY: execute the game and log data.
         next_obs, rewards, terminations, truncations, infos = envs.step(actions)
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
-        if "final_info" in infos:
-            for info in infos["final_info"]:
-                if info is not None:
-                    print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
-                    writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
-                    writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
-                    break
+        for episodic_return, episodic_length in extract_episode_statistics(infos):
+            print(f"global_step={global_step}, episodic_return={episodic_return}")
+            writer.add_scalar("charts/episodic_return", episodic_return, global_step)
+            writer.add_scalar("charts/episodic_length", episodic_length, global_step)
 
-        # TRY NOT TO MODIFY: save data to reply buffer; handle `final_observation`
+        # Save the true terminal observation when same-step autoreset returns reset observations.
         real_next_obs = next_obs.copy()
-        final_observations = infos.get("final_observation")
+        final_observations, final_observation_mask = final_observations_from_infos(infos)
         for idx, trunc in enumerate(truncations):
-            if trunc and final_observations is not None and final_observations[idx] is not None:
+            if (
+                (terminations[idx] or trunc)
+                and final_observations is not None
+                and final_observation_mask[idx]
+                and final_observations[idx] is not None
+            ):
                 real_next_obs[idx] = final_observations[idx]
-        rb.add(obs, real_next_obs, actions, rewards, terminations, infos)
+        if args.robust_target_mode in {"kl_physical", "kl_physical_radius"}:
+            ensemble_next_observations, ensemble_rewards, ensemble_dones = physical_outcomes
+            if args.kl_physical_verify_nominal and "nominal" in physical_dynamics_labels:
+                nominal_index = physical_dynamics_labels.index("nominal")
+                obs_error = float(
+                    np.max(np.abs(ensemble_next_observations[0, nominal_index] - real_next_obs[0]))
+                )
+                reward_error = abs(float(ensemble_rewards[0, nominal_index] - rewards[0]))
+                done_matches = bool(ensemble_dones[0, nominal_index] == float(terminations[0]))
+                if (
+                    obs_error > args.kl_physical_verify_tolerance
+                    or reward_error > args.kl_physical_verify_tolerance
+                    or not done_matches
+                ):
+                    raise RuntimeError(
+                        "nominal KL physical branch did not reproduce the live transition: "
+                        f"obs_error={obs_error}, reward_error={reward_error}, done_matches={done_matches}"
+                    )
+                if global_step % 100 == 0:
+                    writer.add_scalar("kl_physical/nominal_obs_max_abs_error", obs_error, global_step)
+                    writer.add_scalar("kl_physical/nominal_reward_abs_error", reward_error, global_step)
+            rb.add(
+                obs,
+                real_next_obs,
+                actions,
+                rewards,
+                terminations,
+                infos,
+                ensemble_next_observations=ensemble_next_observations,
+                ensemble_rewards=ensemble_rewards,
+                ensemble_dones=ensemble_dones,
+            )
+        else:
+            rb.add(obs, real_next_obs, actions, rewards, terminations, infos)
 
         # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
         obs = next_obs
@@ -446,6 +811,97 @@ if __name__ == "__main__":
                     target_q_clip_fraction = None
                     target_q_clip_count = None
                     target_q_excess_mean = None
+                    physical_joint_returns = None
+                    physical_reference_target = None
+                    physical_worst_target = None
+                    physical_pessimism_gap = None
+                elif args.robust_target_mode in {"kl_physical", "kl_physical_radius"}:
+                    batch_size, num_dynamics, obs_dim = data.ensemble_next_observations.shape
+                    flat_next_observations = data.ensemble_next_observations.reshape(
+                        batch_size * num_dynamics,
+                        obs_dim,
+                    )
+                    common_target_noise = clipped_noise.unsqueeze(1).expand(
+                        batch_size,
+                        num_dynamics,
+                        clipped_noise.shape[-1],
+                    )
+                    flat_next_actions = (
+                        target_actor(flat_next_observations)
+                        + common_target_noise.reshape(batch_size * num_dynamics, -1)
+                    ).clamp(
+                        envs.single_action_space.low[0],
+                        envs.single_action_space.high[0],
+                    )
+                    physical_qf1_next = qf1_target(flat_next_observations, flat_next_actions).view(
+                        batch_size,
+                        num_dynamics,
+                    )
+                    physical_qf2_next = qf2_target(flat_next_observations, flat_next_actions).view(
+                        batch_size,
+                        num_dynamics,
+                    )
+                    physical_min_q_next = torch.min(physical_qf1_next, physical_qf2_next)
+                    physical_joint_returns = data.ensemble_rewards + (
+                        1 - data.ensemble_dones
+                    ) * args.gamma * physical_min_q_next
+                    physical_reference_target = torch.sum(
+                        physical_dynamics_weights_tensor * physical_joint_returns,
+                        dim=1,
+                    )
+                    physical_worst_target = torch.min(physical_joint_returns, dim=1).values
+                    if args.robust_target_mode == "kl_physical_radius":
+                        (
+                            next_q_value,
+                            physical_adversarial_weights,
+                            physical_effective_beta,
+                            physical_implicit_kl_radius,
+                        ) = kl_constrained_discrete_target(
+                            physical_joint_returns,
+                            args.kl_radius,
+                            physical_log_weights,
+                            args.kl_radius_bisection_steps,
+                        )
+                    else:
+                        next_q_value, physical_adversarial_weights = kl_regularized_discrete_target(
+                            physical_joint_returns,
+                            args.kl_beta,
+                            physical_log_weights,
+                        )
+                        physical_effective_beta = torch.full(
+                            (batch_size,),
+                            args.kl_beta,
+                            dtype=physical_joint_returns.dtype,
+                            device=physical_joint_returns.device,
+                        )
+                        physical_implicit_kl_radius = torch.sum(
+                            physical_adversarial_weights
+                            * (
+                                torch.log(physical_adversarial_weights.clamp_min(1e-12))
+                                - physical_log_weights
+                            ),
+                            dim=1,
+                        )
+                    physical_pessimism_gap = physical_reference_target - next_q_value
+                    physical_worst_member_index = torch.argmin(physical_joint_returns, dim=1, keepdim=True)
+                    physical_worst_member_weight = torch.gather(
+                        physical_adversarial_weights,
+                        dim=1,
+                        index=physical_worst_member_index,
+                    ).view(-1)
+                    physical_adversarial_entropy = -torch.sum(
+                        physical_adversarial_weights
+                        * torch.log(physical_adversarial_weights.clamp_min(1e-12)),
+                        dim=1,
+                    )
+                    min_qf_next_target_pre_clip = None
+                    min_qf_next_target_post_clip = None
+                    target_q_clip_fraction = None
+                    target_q_clip_count = None
+                    target_q_excess_mean = None
+                    kl_log_moment_target_pre_clip = None
+                    kl_log_moment_target_for_exp = None
+                    kl_moment_target = None
                 else:
                     qf1_next_target = qf1_target(data.next_observations, next_state_actions)
                     qf2_next_target = qf2_target(data.next_observations, next_state_actions)
@@ -473,8 +929,11 @@ if __name__ == "__main__":
                 kl_log_moment2_for_exp = clamp_log_moment_for_exp(qf2_a_values, args)
                 kl_moment1 = torch.exp(kl_log_moment1_for_exp)
                 kl_moment2 = torch.exp(kl_log_moment2_for_exp)
-                qf1_loss = F.mse_loss(kl_moment1, kl_moment_target)
-                qf2_loss = F.mse_loss(kl_moment2, kl_moment_target)
+                qf1_moment_mse = F.mse_loss(kl_moment1, kl_moment_target)
+                qf2_moment_mse = F.mse_loss(kl_moment2, kl_moment_target)
+                kl_moment_loss_scale = (args.gamma * args.kl_beta) ** 2 if args.kl_rescale_moment_loss else 1.0
+                qf1_loss = kl_moment_loss_scale * qf1_moment_mse
+                qf2_loss = kl_moment_loss_scale * qf2_moment_mse
             else:
                 qf1_loss = F.mse_loss(qf1_a_values, next_q_value)
                 qf2_loss = F.mse_loss(qf2_a_values, next_q_value)
@@ -536,7 +995,11 @@ if __name__ == "__main__":
                 if args.robust_target_mode == "kl_moment":
                     implied_q1 = -args.gamma * args.kl_beta * qf1_a_values
                     implied_q2 = -args.gamma * args.kl_beta * qf2_a_values
+                    implied_q_target = -args.gamma * args.kl_beta * kl_log_moment_target_pre_clip
                     writer.add_scalar("kl/beta", args.kl_beta, global_step)
+                    writer.add_scalar("kl/moment_loss_scale", kl_moment_loss_scale, global_step)
+                    writer.add_scalar("kl/qf1_moment_mse_unscaled", qf1_moment_mse.item(), global_step)
+                    writer.add_scalar("kl/qf2_moment_mse_unscaled", qf2_moment_mse.item(), global_step)
                     writer.add_scalar("kl/log_moment1_mean", qf1_a_values.mean().item(), global_step)
                     writer.add_scalar("kl/log_moment2_mean", qf2_a_values.mean().item(), global_step)
                     writer.add_scalar("kl/log_moment1_mean_for_exp", kl_log_moment1_for_exp.mean().item(), global_step)
@@ -545,6 +1008,21 @@ if __name__ == "__main__":
                     writer.add_scalar("kl/log_moment_target_mean_for_exp", kl_log_moment_target_for_exp.mean().item(), global_step)
                     writer.add_scalar("kl/log_moment_target_min_for_exp", kl_log_moment_target_for_exp.min().item(), global_step)
                     writer.add_scalar("kl/log_moment_target_max_for_exp", kl_log_moment_target_for_exp.max().item(), global_step)
+                    writer.add_scalar(
+                        "kl/log_moment1_clamp_fraction",
+                        (kl_log_moment1_for_exp != qf1_a_values).float().mean().item(),
+                        global_step,
+                    )
+                    writer.add_scalar(
+                        "kl/log_moment2_clamp_fraction",
+                        (kl_log_moment2_for_exp != qf2_a_values).float().mean().item(),
+                        global_step,
+                    )
+                    writer.add_scalar(
+                        "kl/log_moment_target_clamp_fraction",
+                        (kl_log_moment_target_for_exp != kl_log_moment_target_pre_clip).float().mean().item(),
+                        global_step,
+                    )
                     writer.add_scalar("kl/moment1_mean", kl_moment1.mean().item(), global_step)
                     writer.add_scalar("kl/moment2_mean", kl_moment2.mean().item(), global_step)
                     writer.add_scalar("kl/moment_target_mean", kl_moment_target.mean().item(), global_step)
@@ -566,8 +1044,115 @@ if __name__ == "__main__":
                     writer.add_scalar("kl/value_g_loss", vf_loss.item(), global_step)
                     writer.add_scalar("kl/implied_q1_mean", implied_q1.mean().item(), global_step)
                     writer.add_scalar("kl/implied_q2_mean", implied_q2.mean().item(), global_step)
+                    writer.add_scalar("kl/implied_q_target_mean", implied_q_target.mean().item(), global_step)
+                    writer.add_scalar("kl/implied_q1_target_mse", F.mse_loss(implied_q1, implied_q_target).item(), global_step)
+                    writer.add_scalar("kl/implied_q2_target_mse", F.mse_loss(implied_q2, implied_q_target).item(), global_step)
                     writer.add_scalar("kl/implied_q1_p95", torch.quantile(implied_q1, 0.95).item(), global_step)
                     writer.add_scalar("kl/implied_q1_p99", torch.quantile(implied_q1, 0.99).item(), global_step)
+                elif args.robust_target_mode in {"kl_physical", "kl_physical_radius"}:
+                    if args.robust_target_mode == "kl_physical":
+                        writer.add_scalar("kl_physical/beta", args.kl_beta, global_step)
+                    else:
+                        writer.add_scalar("kl_physical/requested_radius", args.kl_radius, global_step)
+                        finite_beta = physical_effective_beta[torch.isfinite(physical_effective_beta)]
+                        if finite_beta.numel() > 0:
+                            writer.add_scalar(
+                                "kl_physical/effective_beta_median",
+                                torch.median(finite_beta).item(),
+                                global_step,
+                            )
+                            writer.add_scalar(
+                                "kl_physical/effective_beta_mean",
+                                finite_beta.mean().item(),
+                                global_step,
+                            )
+                        writer.add_scalar(
+                            "kl_physical/worst_case_saturation_fraction",
+                            (physical_effective_beta == 0).float().mean().item(),
+                            global_step,
+                        )
+                    writer.add_scalar("kl_physical/num_dynamics", len(physical_dynamics_labels), global_step)
+                    writer.add_scalar(
+                        "kl_physical/joint_return_mean",
+                        physical_joint_returns.mean().item(),
+                        global_step,
+                    )
+                    writer.add_scalar(
+                        "kl_physical/joint_return_std_across_dynamics",
+                        physical_joint_returns.std(dim=1, unbiased=False).mean().item(),
+                        global_step,
+                    )
+                    writer.add_scalar(
+                        "kl_physical/reference_target_mean",
+                        physical_reference_target.mean().item(),
+                        global_step,
+                    )
+                    writer.add_scalar(
+                        "kl_physical/robust_target_mean",
+                        next_q_value.mean().item(),
+                        global_step,
+                    )
+                    writer.add_scalar(
+                        "kl_physical/worst_member_target_mean",
+                        physical_worst_target.mean().item(),
+                        global_step,
+                    )
+                    writer.add_scalar(
+                        "kl_physical/pessimism_gap_mean",
+                        physical_pessimism_gap.mean().item(),
+                        global_step,
+                    )
+                    writer.add_scalar(
+                        "kl_physical/pessimism_gap_p95",
+                        torch.quantile(physical_pessimism_gap, 0.95).item(),
+                        global_step,
+                    )
+                    writer.add_scalar(
+                        "kl_physical/implicit_kl_radius_mean",
+                        physical_implicit_kl_radius.mean().item(),
+                        global_step,
+                    )
+                    writer.add_scalar(
+                        "kl_physical/implicit_kl_radius_p95",
+                        torch.quantile(physical_implicit_kl_radius, 0.95).item(),
+                        global_step,
+                    )
+                    writer.add_scalar(
+                        "kl_physical/worst_member_adversarial_weight_mean",
+                        physical_worst_member_weight.mean().item(),
+                        global_step,
+                    )
+                    for member_index, member_label in enumerate(
+                        physical_dynamics_labels
+                    ):
+                        metric_label = (
+                            member_label.replace(":", "_")
+                            .replace(".", "p")
+                            .replace("-", "m")
+                        )
+                        writer.add_scalar(
+                            f"kl_physical/member_weight/{metric_label}",
+                            physical_adversarial_weights[
+                                :, member_index
+                            ].mean().item(),
+                            global_step,
+                        )
+                        writer.add_scalar(
+                            f"kl_physical/member_worst_fraction/{metric_label}",
+                            (
+                                physical_worst_member_index.squeeze(1)
+                                == member_index
+                            )
+                            .float()
+                            .mean()
+                            .item(),
+                            global_step,
+                        )
+                    writer.add_scalar(
+                        "kl_physical/effective_num_dynamics_mean",
+                        torch.exp(physical_adversarial_entropy).mean().item(),
+                        global_step,
+                    )
                 else:
                     writer.add_scalar("targets/min_q_next_mean_pre_clip", min_qf_next_target_pre_clip.mean().item(), global_step)
                     writer.add_scalar("targets/min_q_next_max_pre_clip", min_qf_next_target_pre_clip.max().item(), global_step)
@@ -625,5 +1210,7 @@ if __name__ == "__main__":
                 f"videos/{run_name}-eval",
             )
 
+    for physical_env in physical_dynamics_ensemble:
+        physical_env.close()
     envs.close()
     writer.close()

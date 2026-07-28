@@ -119,7 +119,31 @@ if (( ${#run_dirs[@]} == 0 )); then
     echo "No training run found for exp_name=${exp_name}, seed=${seed} in ${TRAIN_RUN_DIR}"
     exit 1
 fi
-run_dir="$(ls -1dt "${run_dirs[@]}" | head -n 1)"
+
+valid_run_dirs=()
+for candidate_dir in "${run_dirs[@]}"; do
+    candidate_model="${candidate_dir}/${exp_name}.cleanrl_model"
+    if [[ -f "${candidate_model}" ]]; then
+        valid_run_dirs+=("${candidate_dir}")
+    fi
+done
+
+if (( ${#valid_run_dirs[@]} == 0 )); then
+    echo "No saved model found for exp_name=${exp_name}, seed=${seed} in ${TRAIN_RUN_DIR}"
+    printf 'Candidate run directory without a model: %s\n' "${run_dirs[@]}"
+    exit 1
+fi
+
+run_dir="${valid_run_dirs[0]}"
+for candidate_dir in "${valid_run_dirs[@]:1}"; do
+    if [[ "${candidate_dir}" -nt "${run_dir}" ]]; then
+        run_dir="${candidate_dir}"
+    fi
+done
+if (( ${#valid_run_dirs[@]} > 1 )); then
+    echo "Found ${#valid_run_dirs[@]} saved models; using newest run directory: ${run_dir}"
+fi
+
 model_path="${run_dir}/${exp_name}.cleanrl_model"
 norm_stats_path="${model_path}.norm_stats.npz"
 

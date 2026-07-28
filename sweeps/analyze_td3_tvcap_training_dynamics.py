@@ -85,6 +85,27 @@ def parse_run(path: Path) -> tuple[str, int]:
     return match.group(1), int(match.group(2))
 
 
+def newest_event_per_run(paths: list[Path]) -> list[Path]:
+    selected: dict[tuple[str, int], Path] = {}
+    duplicate_counts: dict[tuple[str, int], int] = {}
+    for path in paths:
+        key = parse_run(path)
+        duplicate_counts[key] = duplicate_counts.get(key, 0) + 1
+        current = selected.get(key)
+        if current is None or path.stat().st_mtime > current.stat().st_mtime:
+            selected[key] = path
+    duplicates = {
+        key: count for key, count in duplicate_counts.items() if count > 1
+    }
+    if duplicates:
+        details = ", ".join(
+            f"{model}/seed{seed}={count}"
+            for (model, seed), count in sorted(duplicates.items())
+        )
+        print(f"duplicate event runs found; using newest per model/seed: {details}")
+    return sorted(selected.values())
+
+
 def binned_events(steps: np.ndarray, values: np.ndarray, width: int) -> list[tuple[int, float]]:
     bins = (steps // width) * width
     return [(int(step_bin), float(np.median(values[bins == step_bin]))) for step_bin in np.unique(bins)]
@@ -113,7 +134,7 @@ def load_events(root: Path, bin_width: int, final_window: int) -> tuple[pd.DataF
     run_rows: list[dict[str, object]] = []
     coverage_rows: list[dict[str, object]] = []
 
-    paths = event_paths(root)
+    paths = newest_event_per_run(event_paths(root))
     if not paths:
         raise FileNotFoundError(f"No TensorBoard event files found below {root}")
 

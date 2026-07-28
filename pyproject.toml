@@ -3,7 +3,7 @@ name = "ppo-robustness"
 version = "0.1.0"
 description = "PPO value-target clipping as a tractable instantiation of TV-ball distributionally robust MDPs"
 authors = [{ name = "Arjun Mahesh", email = "arjun.mahesh@duke.edu" }]
-requires-python = ">=3.8,<3.11"
+requires-python = ">=3.10,<3.12"
 readme = "README.md"
 license = "MIT"
 keywords = [
@@ -15,7 +15,7 @@ keywords = [
 dependencies = [
     "tensorboard>=2.10.0",
     "wandb>=0.13.11",
-    "gymnasium==0.29.1",
+    "gymnasium==1.2.3",
     "torch==2.4.1",
     "moviepy>=1.0.3",
     "huggingface-hub>=0.11.1",
@@ -27,7 +27,8 @@ dependencies = [
 
 [project.optional-dependencies]
 mujoco = [
-    "mujoco<=2.3.3",
+    "mujoco==3.5.0",
+    "glfw>=2.8.0,<3",
     "imageio>=2.14.1,<3",
 ]
 pytest = ["pytest>=7.1.3,<8"]

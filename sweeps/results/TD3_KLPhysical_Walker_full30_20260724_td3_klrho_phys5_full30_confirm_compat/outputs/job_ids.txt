@@ -1,0 +1,20 @@
+selected_model=klprho0p05
+selected_radius=0.05
+seeds=6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35
+training_job=12207998
+training_excluded_nodes=compsci-cluster-fitz-45,compsci-cluster-fitz-46,compsci-cluster-fitz-47,compsci-cluster-fitz-48,compsci-cluster-fitz-49
+evaluation_job=12207999
+package_job=12208000
+expected_models=90
+expected_eval_rows=26820
+expected_eval_shards=269
+training_entrypoint=/home/users/am1015/cleanrl/cleanrl/td3_continuous_action_kl_physical.py
+training_entrypoint_sha256=42853065218eebdf694634fa0fb771dcc0dd638d06d2367f30ae1dbafeba8977
+
+configuration_correction=promotion exported KL_RADIUS_VALUES_STR but trainer reads RADIUS_VALUES_STR
+misconfigured_tasks=12207998_[60-89] trained rho=0.01 and were canceled/quarantined before model save
+misconfigured_run_archive=/home/users/am1015/rl_runs_td3_klrho_misconfigured_20260724_rho0p01
+valid_control_dependency=12207998_59
+corrected_selected_radius_training_job=12212998
+corrected_evaluation_job=12212999
+corrected_package_job=12213000

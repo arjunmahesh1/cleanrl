@@ -6,6 +6,13 @@ import torch
 import torch.nn as nn
 
 
+def _make_sync_vector_env(env_fn):
+    autoreset_mode = getattr(gym.vector, "AutoresetMode", None)
+    if autoreset_mode is None:
+        return gym.vector.SyncVectorEnv([env_fn])
+    return gym.vector.SyncVectorEnv([env_fn], autoreset_mode=autoreset_mode.SAME_STEP)
+
+
 def evaluate(
     model_path: str,
     make_env: Callable,
@@ -17,7 +24,7 @@ def evaluate(
     capture_video: bool = True,
     exploration_noise: float = 0.1,
 ):
-    envs = gym.vector.SyncVectorEnv([make_env(env_id, 0, 0, capture_video, run_name)])
+    envs = _make_sync_vector_env(make_env(env_id, 0, 0, capture_video, run_name))
     actor = Model[0](envs).to(device)
     qf1 = Model[1](envs).to(device)
     qf2 = Model[1](envs).to(device)

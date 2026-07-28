@@ -1,0 +1,4 @@
+env_id,model_label,comparison,reliability_auc_delta,catastrophe_recovery_area,catastrophe_harm_area,dominance_threshold_fraction,strict_improvement_threshold_fraction,worst_survival_delta,worst_survival_delta_threshold,max_survival_delta,max_survival_delta_threshold
+Walker2d-v5,klprho0,klprho0_minus_klprho0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0,0.0
+Walker2d-v5,vanilla,vanilla_minus_klprho0,-0.010751249999999997,0.002293154761904761,0.013044404761904757,0.2537313432835821,0.2537313432835821,-0.12657142857142858,1.0,0.014301587301587298,0.68
+Walker2d-v5,klprho0p05,klprho0p05_minus_klprho0,-0.07841765873015873,0.0,0.07841765873015873,0.0,0.0,-0.16343650793650794,0.875,-0.0021349206349206397,0.0

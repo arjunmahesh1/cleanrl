@@ -19,6 +19,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--result-dir", required=True)
     parser.add_argument("--train-run-dir", required=True)
+    parser.add_argument("--env-id", default="Walker2d-v4")
     parser.add_argument("--caps", nargs="+", default=CAPS)
     parser.add_argument("--seeds", nargs="+", default=[str(seed) for seed in range(1, 31)])
     return parser.parse_args()
@@ -35,7 +36,7 @@ def main() -> None:
 
     def add(axes: list[str], factors: list[str], category: str) -> None:
         for cap, axis, factor, seed in product(args.caps, axes, factors, args.seeds):
-            rows.append(("Walker2d-v4", train_dir, cap, seed, axis, factor, category))
+            rows.append((args.env_id, train_dir, cap, seed, axis, factor, category))
 
     add("friction damping actuator_gain".split(), NONMASS_FACTORS, "single_axis_perturbations")
     add(["mass"], MASS_FACTORS, "single_axis_perturbations")

@@ -21,6 +21,14 @@ SELECTED_AXES = {
         "friction_mass",
         "friction",
     ],
+    "Walker2d-v5": [
+        "mass",
+        "actuator_gain",
+        "action_replace",
+        "friction_mass_damping",
+        "friction_mass",
+        "friction",
+    ],
     "HalfCheetah-v4": [
         "mass",
         "gear",
@@ -35,7 +43,7 @@ SELECTED_AXES = {
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Generate seed-level robustness and reliability plots for the full 30-seed PPO eval."
+        description="Generate seed-level robustness and reliability plots."
     )
     parser.add_argument(
         "--result-dir",
@@ -108,7 +116,12 @@ def model_sort_key(label: str) -> tuple[int, float, str]:
         frac = match.group(2) or "0"
         value = float(f"{match.group(1)}.{frac}")
         return (5, value, label)
-    return (6, math.inf, label)
+    match = re.fullmatch(r"klprho(\d+)(?:p(\d+))?", label)
+    if match:
+        frac = match.group(2) or "0"
+        value = float(f"{match.group(1)}.{frac}")
+        return (6, value, label)
+    return (7, math.inf, label)
 
 
 def display_model(label: str) -> str:
@@ -133,6 +146,11 @@ def display_model(label: str) -> str:
         frac = match.group(2)
         cap = match.group(1) if frac is None else f"{match.group(1)}.{frac}"
         return f"TV c={cap}"
+    match = re.fullmatch(r"klprho(\d+)(?:p(\d+))?", label)
+    if match:
+        frac = match.group(2)
+        radius = match.group(1) if frac is None else f"{match.group(1)}.{frac}"
+        return rf"KL $\rho={radius}$"
     return label
 
 
@@ -181,7 +199,10 @@ def load_metrics(result_dir: Path) -> pd.DataFrame:
         parsed = df["scenario_label"].map(parse_factor_from_scenario)
         df["axis"] = parsed.map(lambda x: x[0])
         df["factor"] = parsed.map(lambda x: x[1])
-    model_pattern = r"^(a\d+p\d+|klb\d+(p\d+)?|kle\d+(p\d+)?|q\d+(p\d+)?|tvc\d+(p\d+)?)$"
+    model_pattern = (
+        r"^(a\d+p\d+|klb\d+(p\d+)?|kle\d+(p\d+)?|q\d+(p\d+)?|"
+        r"tvc\d+(p\d+)?|klprho\d+(p\d+)?)$"
+    )
     df = df[df["model_label"].isin(["vanilla"]) | df["model_label"].str.match(model_pattern, na=False)].copy()
     df["factor"] = df["factor"].astype(float)
     df["seed"] = df["seed"].astype(int)
@@ -633,20 +654,20 @@ def write_readme(
     fixed_model_label: str | None,
 ) -> None:
     lines = [
-        "# Full 30-Seed Seed-Level Analysis Plots",
+        "# Seed-Level Analysis Plots",
         "",
         f"Source result directory: `{result_dir.as_posix()}`",
         "",
         "Outputs:",
-        "- `seed_spaghetti_by_axis/`: one figure per environment/axis. Each cap panel shows all 30 seed return curves over perturbation level, plus a thick median curve.",
-        "- `fixed_seed_all_caps/`: one figure per environment/seed. Each panel is a selected perturbation axis, with all caps shown together.",
+        "- `seed_spaghetti_by_axis/`: one figure per environment/axis. Each model panel shows all seed return curves over perturbation level, plus a thick median curve.",
+        "- `fixed_seed_all_caps/`: one figure per environment/seed. Each panel is a selected perturbation axis, with all models shown together.",
         "- `seed_scatter/`: one-point-per-seed scatter plots at a stress factor, both raw return and same-seed vanilla-subtracted return.",
         "- `reliability_curves/`: reliability survival curves, `P(return >= threshold)`, where threshold is normalized by vanilla nominal median return.",
         "- `seed_conditioned_effect/`: vanilla nominal quality versus robust curve-average gain, shown both ex post over the cap menu and for one preselected cap.",
         "- `stress_scenario_summary.csv`: model-level stress-factor summary with reliability/failure/win-rate statistics.",
-        "- `best_caps_by_axis.csv`: best cap by median stress-factor return for each axis.",
-        "- `best_caps_by_reliability_auc.csv`: best cap by area under the reliability curve between 0 and 1x vanilla nominal median return.",
-        "- `per_seed_best_caps.csv`: per-seed best cap and number of caps beating same-seed vanilla at the stress factor.",
+        "- `best_caps_by_axis.csv`: best model by median stress-factor return for each axis.",
+        "- `best_caps_by_reliability_auc.csv`: best model by area under the reliability curve between 0 and 1x vanilla nominal median return.",
+        "- `per_seed_best_caps.csv`: per-seed best model and number of robust models beating same-seed vanilla at the stress factor.",
         "",
         f"Default catastrophe threshold fraction: `{threshold_frac}`.",
         f"Scatter/reliability axis mode: `{'all axes' if all_axes else 'selected high-signal axes'}`.",
